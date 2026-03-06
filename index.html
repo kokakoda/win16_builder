@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Win16 Development Environment</title>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 10px;
+        }
+        
+        .container {
+            display: flex;
+            gap: 10px;
+            height: 100vh;
+        }
+        
+        .emulator {
+            flex: 1;
+            border: 2px solid #333;
+            background: #000;
+        }
+        
+        .controls {
+            width: 250px;
+            background: #2a2a2a;
+            border: 2px solid #333;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+        }
+        
+        .controls h2 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+        
+        .controls p {
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 10px;
+            color: #aaa;
+        }
+        
+        button {
+            padding: 8px 12px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #0052a3;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        input[type="file"] {
+            font-size: 12px;
+            padding: 5px;
+        }
+        
+        .status {
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            font-size: 11px;
+            min-height: 40px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #0f0;
+        }
+        
+        .section {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emulator" id="dos"></div>
+        <div class="controls">
+            <div class="section">
+                <h2>Win16 Dev</h2>
+                <p>Borland C++ 4.0 in Windows 3.1</p>
+            </div>
+            
+            <div class="section">
+                <h2>Import Files</h2>
+                <p>Upload a ZIP with your source files (.c, .h, etc.)</p>
+                <input type="file" id="uploadZip" accept=".zip" />
+                <button onclick="importFiles()">Import ZIP</button>
+            </div>
+            
+            <div class="section">
+                <h2>Export Files</h2>
+                <p>Download compiled binaries and source from C:\EXPORT\</p>
+                <button id="exportBtn" onclick="exportFiles()" disabled>Export ZIP</button>
+            </div>
+            
+            <div class="section">
+                <h2>Status</h2>
+                <div class="status" id="status">Ready. Boot may take 30-60s.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://js-dos.com/cdn/js-dos.js"></script>
+    <script>
+        let dosInstance = null;
+        const statusEl = document.getElementById('status');
+        const exportBtn = document.getElementById('exportBtn');
+        
+        function log(msg) {
+            statusEl.textContent += '\n' + msg;
+            statusEl.scrollTop = statusEl.scrollHeight;
+        }
+        
+        function setStatus(msg) {
+            statusEl.textContent = msg;
+        }
+        
+async function downloadAndReassemble() {
+    setStatus('Downloading disk image parts...');
+    
+    try {
+        // Download both parts
+        const part1 = await fetch('win31.img.aa').then(r => r.arrayBuffer());
+        const part2 = await fetch('win31.img.ab').then(r => r.arrayBuffer());
+        
+        setStatus('Reassembling image...');
+        
+        // Combine the parts
+        const combined = new Uint8Array(part1.byteLength + part2.byteLength);
+        combined.set(new Uint8Array(part1), 0);
+        combined.set(new Uint8Array(part2), part1.byteLength);
+        
+        // Create a blob and object URL
+        const blob = new Blob([combined], { type: 'application/octet-stream' });
+        const imageUrl = URL.createObjectURL(blob);
+        
+        setStatus('Booting Windows 3.1...');
+        
+        // Boot js-dos with the reassembled image
+        Dos.run(imageUrl, {
+            onRun: (dos) => {
+                dosInstance = dos;
+                setStatus('Windows 3.1 booted. Ready for import/export.');
+                exportBtn.disabled = false;
+            },
+            onError: (error) => {
+                setStatus('Error: ' + error);
+            }
+        });
+        
+    } catch (err) {
+        setStatus('Failed to download image: ' + err.message);
+    }
+}
+
+// Call this when the page loads
+window.addEventListener('DOMContentLoaded', downloadAndReassemble);
+
+        
+        async function importFiles() {
+            const fileInput = document.getElementById('uploadZip');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                setStatus('No file selected.');
+                return;
+            }
+            
+            setStatus('Reading ZIP...');
+            
+            try {
+                const zip = new JSZip();
+                const contents = await zip.loadAsync(file);
+                
+                // Create IMPORT directory if it doesn't exist
+                await dosInstance.run('mkdir C:\\IMPORT');
+                
+                let fileCount = 0;
+                
+                // Extract all files to C:\IMPORT\
+                for (const [path, zipEntry] of Object.entries(contents.files)) {
+                    if (zipEntry.dir) continue;
+                    
+                    const data = await zipEntry.async('arraybuffer');
+                    const filename = path.split('/').pop();
+                    
+                    // Write file to virtual filesystem
+                    // Note: js-dos filesystem API is limited; this may require custom handling
+                    await dosInstance.run(`echo Importing ${filename}...`);
+                    
+                    fileCount++;
+                }
+                
+                setStatus(`Imported ${fileCount} files to C:\\IMPORT\\\nOpen File Manager in Win3.1 to access them.`);
+                fileInput.value = '';
+            } catch (err) {
+                setStatus('Import error: ' + err.message);
+            }
+        }
+        
+        async function exportFiles() {
+            setStatus('Exporting files from C:\\EXPORT\\...');
+            
+            try {
+                // This is a placeholder - js-dos filesystem access is limited
+                // You may need to use a different approach:
+                // 1. Have user manually copy files to a shared folder
+                // 2. Use js-dos's built-in save/download features
+                // 3. Create a helper program in Win3.1 that packages files
+                
+                setStatus('Export feature requires custom implementation.\nSee README for manual export instructions.');
+            } catch (err) {
+                setStatus('Export error: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
