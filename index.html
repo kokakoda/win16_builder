@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Win16 Development Environment</title>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xz-wasm@1.0.0/dist/index.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -151,16 +152,22 @@ async function downloadAndReassemble() {
     setStatus('Downloading disk image parts...');
     
     try {
-        // Download both parts
-        const part1 = await fetch('win31.img.aa').then(r => r.arrayBuffer());
-        const part2 = await fetch('win31.img.ab').then(r => r.arrayBuffer());
+        // Download both compressed parts
+        const part1Compressed = await fetch('win31.img.xz.aa').then(r => r.arrayBuffer());
+        const part2Compressed = await fetch('win31.img.xz.ab').then(r => r.arrayBuffer());
+        
+        setStatus('Decompressing part 1...');
+        const part1 = await XZ.decompress(new Uint8Array(part1Compressed));
+        
+        setStatus('Decompressing part 2...');
+        const part2 = await XZ.decompress(new Uint8Array(part2Compressed));
         
         setStatus('Reassembling image...');
         
-        // Combine the parts
-        const combined = new Uint8Array(part1.byteLength + part2.byteLength);
-        combined.set(new Uint8Array(part1), 0);
-        combined.set(new Uint8Array(part2), part1.byteLength);
+        // Combine the decompressed parts
+        const combined = new Uint8Array(part1.length + part2.length);
+        combined.set(part1, 0);
+        combined.set(part2, part1.length);
         
         // Create a blob and object URL
         const blob = new Blob([combined], { type: 'application/octet-stream' });
@@ -181,11 +188,10 @@ async function downloadAndReassemble() {
         });
         
     } catch (err) {
-        setStatus('Failed to download image: ' + err.message);
+        setStatus('Failed to download/decompress image: ' + err.message);
     }
 }
 
-// Call this when the page loads
 window.addEventListener('DOMContentLoaded', downloadAndReassemble);
 
         
