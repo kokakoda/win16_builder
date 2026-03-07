@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Win16 Development Environment</title>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
-    <script>
-        let XZ;
-        async function initXZ() {
-            const xzModule = await import('https://cdn.jsdelivr.net/npm/xz-wasm@1.0.0/dist/index.min.js');
-            XZ = xzModule;
-        }
-        initXZ();
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2/dist/pako.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -162,43 +155,30 @@
             setStatus('Downloading disk image parts...');
             
             try {
-                // Wait for XZ to be initialized
-                setStatus('Waiting for XZ library...');
-                let xzWaitCount = 0;
-                while (!XZ && xzWaitCount < 50) {
-                    await new Promise(r => setTimeout(r, 100));
-                    xzWaitCount++;
-                }
-                
-                if (!XZ) {
-                    setStatus('Error: XZ library failed to load');
-                    return;
-                }
-                
-                setStatus('XZ library ready. Fetching part 1...');
-                const response1 = await fetch('win31.img.xz.aa');
+                setStatus('Fetching part 1...');
+                const response1 = await fetch('win31.img.gz.aa');
                 if (!response1.ok) {
-                    setStatus('Error: Failed to fetch win31.img.xz.aa (HTTP ' + response1.status + ')');
+                    setStatus('Error: Failed to fetch win31.img.gz.aa (HTTP ' + response1.status + ')');
                     return;
                 }
                 const part1Compressed = await response1.arrayBuffer();
                 setStatus('Part 1 fetched (' + (part1Compressed.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
                 
                 setStatus('Fetching part 2...');
-                const response2 = await fetch('win31.img.xz.ab');
+                const response2 = await fetch('win31.img.gz.ab');
                 if (!response2.ok) {
-                    setStatus('Error: Failed to fetch win31.img.xz.ab (HTTP ' + response2.status + ')');
+                    setStatus('Error: Failed to fetch win31.img.gz.ab (HTTP ' + response2.status + ')');
                     return;
                 }
                 const part2Compressed = await response2.arrayBuffer();
                 setStatus('Part 2 fetched (' + (part2Compressed.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
                 
-                setStatus('Decompressing part 1...');
-                const part1 = await XZ.decompress(new Uint8Array(part1Compressed));
+                setStatus('Decompressing part 1 (this may take a minute)...');
+                const part1 = pako.inflate(new Uint8Array(part1Compressed));
                 setStatus('Part 1 decompressed (' + (part1.length / 1024 / 1024).toFixed(2) + ' MB)');
                 
-                setStatus('Decompressing part 2...');
-                const part2 = await XZ.decompress(new Uint8Array(part2Compressed));
+                setStatus('Decompressing part 2 (this may take a minute)...');
+                const part2 = pako.inflate(new Uint8Array(part2Compressed));
                 setStatus('Part 2 decompressed (' + (part2.length / 1024 / 1024).toFixed(2) + ' MB)');
                 
                 setStatus('Reassembling image...');
