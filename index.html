@@ -98,6 +98,7 @@
             white-space: pre-wrap;
             word-break: break-word;
             color: #0f0;
+            font-family: monospace;
         }
         
         .section {
@@ -146,12 +147,15 @@
         const exportBtn = document.getElementById('exportBtn');
         
         function log(msg) {
+            console.log(msg);
             statusEl.textContent += '\n' + msg;
             statusEl.scrollTop = statusEl.scrollHeight;
         }
         
         function setStatus(msg) {
+            console.log(msg);
             statusEl.textContent = msg;
+            statusEl.scrollTop = statusEl.scrollHeight;
         }
         
         async function downloadAndReassemble() {
@@ -159,34 +163,55 @@
             
             try {
                 // Wait for XZ to be initialized
-                while (!XZ) {
+                setStatus('Waiting for XZ library...');
+                let xzWaitCount = 0;
+                while (!XZ && xzWaitCount < 50) {
                     await new Promise(r => setTimeout(r, 100));
+                    xzWaitCount++;
                 }
                 
-                // Download both compressed parts
-                const part1Compressed = await fetch('win31.img.xz.aa').then(r => r.arrayBuffer());
-                const part2Compressed = await fetch('win31.img.xz.ab').then(r => r.arrayBuffer());
+                if (!XZ) {
+                    setStatus('Error: XZ library failed to load');
+                    return;
+                }
+                
+                setStatus('XZ library ready. Fetching part 1...');
+                const response1 = await fetch('win31.img.xz.aa');
+                if (!response1.ok) {
+                    setStatus('Error: Failed to fetch win31.img.xz.aa (HTTP ' + response1.status + ')');
+                    return;
+                }
+                const part1Compressed = await response1.arrayBuffer();
+                setStatus('Part 1 fetched (' + (part1Compressed.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
+                
+                setStatus('Fetching part 2...');
+                const response2 = await fetch('win31.img.xz.ab');
+                if (!response2.ok) {
+                    setStatus('Error: Failed to fetch win31.img.xz.ab (HTTP ' + response2.status + ')');
+                    return;
+                }
+                const part2Compressed = await response2.arrayBuffer();
+                setStatus('Part 2 fetched (' + (part2Compressed.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
                 
                 setStatus('Decompressing part 1...');
                 const part1 = await XZ.decompress(new Uint8Array(part1Compressed));
+                setStatus('Part 1 decompressed (' + (part1.length / 1024 / 1024).toFixed(2) + ' MB)');
                 
                 setStatus('Decompressing part 2...');
                 const part2 = await XZ.decompress(new Uint8Array(part2Compressed));
+                setStatus('Part 2 decompressed (' + (part2.length / 1024 / 1024).toFixed(2) + ' MB)');
                 
                 setStatus('Reassembling image...');
-                
-                // Combine the decompressed parts
                 const combined = new Uint8Array(part1.length + part2.length);
                 combined.set(part1, 0);
                 combined.set(part2, part1.length);
+                setStatus('Image reassembled (' + (combined.length / 1024 / 1024).toFixed(2) + ' MB)');
                 
-                // Create a blob and object URL
                 const blob = new Blob([combined], { type: 'application/octet-stream' });
                 const imageUrl = URL.createObjectURL(blob);
                 
                 setStatus('Booting Windows 3.1...');
                 
-                // Boot js-dos with the reassembled image
                 Dos.run(imageUrl, {
                     onRun: (dos) => {
                         dosInstance = dos;
@@ -194,12 +219,12 @@
                         exportBtn.disabled = false;
                     },
                     onError: (error) => {
-                        setStatus('Error: ' + error);
+                        setStatus('Dos.run error: ' + error);
                     }
                 });
                 
             } catch (err) {
-                setStatus('Failed to download/decompress image: ' + err.message);
+                setStatus('Error: ' + err.message + '\n' + err.stack);
             }
         }
         
@@ -218,20 +243,16 @@
                 const zip = new JSZip();
                 const contents = await zip.loadAsync(file);
                 
-                // Create IMPORT directory if it doesn't exist
                 await dosInstance.run('mkdir C:\\IMPORT');
                 
                 let fileCount = 0;
                 
-                // Extract all files to C:\IMPORT\
                 for (const [path, zipEntry] of Object.entries(contents.files)) {
                     if (zipEntry.dir) continue;
                     
                     const data = await zipEntry.async('arraybuffer');
                     const filename = path.split('/').pop();
                     
-                    // Write file to virtual filesystem
-                    // Note: js-dos filesystem API is limited; this may require custom handling
                     await dosInstance.run(`echo Importing ${filename}...`);
                     
                     fileCount++;
