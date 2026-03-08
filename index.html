@@ -153,6 +153,10 @@
         
 async function downloadAndReassemble() {
     setStatus('Checking dependencies...');
+
+    console.log('pako loaded?', typeof pako !== 'undefined');
+    console.log('Dos loaded?', typeof Dos !== 'undefined');
+    console.log('JSZip loaded?', typeof JSZip !== 'undefined');
     
     // Verify pako is loaded
     if (typeof pako === 'undefined') {
@@ -213,7 +217,7 @@ async function downloadAndReassemble() {
         });
         
     } catch (err) {
-        setStatus('Error: ' + (err.message || 'Unknown error') + '\n' + (err.stack || ''));
+        setStatus('Error: ' + (err.message || 'Unknown error') + '\nStack: ' + (err.stack || 'N/A'));
     }
 }
         
