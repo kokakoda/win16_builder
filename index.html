@@ -6,7 +6,6 @@
     <title>Win16 Development Environment</title>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pako@2/dist/pako.min.js"></script>
-    <script src="https://js-dos.com/cdn/js-dos.js"></script>
     <style>
         * {
             margin: 0;
@@ -153,20 +152,6 @@
         }
         
         async function downloadAndReassemble() {
-            setStatus('Checking dependencies...');
-            
-            // Wait for Dos to load
-            let attempts = 0;
-            while (typeof Dos === 'undefined' && attempts < 50) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                attempts++;
-            }
-            
-            if (typeof Dos === 'undefined') {
-                setStatus('Error: js-dos library failed to load after 5 seconds');
-                return;
-            }
-            
             setStatus('Downloading disk image parts...');
             
             try {
@@ -203,7 +188,14 @@
                 
                 setStatus('Booting Windows 3.1...');
                 
-                Dos.run(imageUrl, {
+                // Use window.Dos if Dos is not directly available
+                const DosLib = window.Dos || window.dosInstance;
+                if (!DosLib) {
+                    setStatus('Error: js-dos library still not available');
+                    return;
+                }
+                
+                DosLib.run(imageUrl, {
                     onRun: (dos) => {
                         dosInstance = dos;
                         setStatus('Windows 3.1 booted. Ready for import/export.');
@@ -260,7 +252,19 @@
             setStatus('Export feature requires custom implementation.\nSee README for manual export instructions.');
         }
         
-        window.addEventListener('load', downloadAndReassemble);
+        // Load js-dos dynamically with a callback
+        window.addEventListener('load', function() {
+            const script = document.createElement('script');
+            script.src = 'https://js-dos.com/cdn/js-dos.js';
+            script.onload = function() {
+                console.log('js-dos loaded, Dos =', typeof window.Dos);
+                downloadAndReassemble();
+            };
+            script.onerror = function() {
+                setStatus('Error: Failed to load js-dos library');
+            };
+            document.head.appendChild(script);
+        });
     </script>
 </body>
 </html>
