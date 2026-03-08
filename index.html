@@ -152,6 +152,19 @@
         }
         
 async function downloadAndReassemble() {
+    setStatus('Checking dependencies...');
+    
+    // Verify pako is loaded
+    if (typeof pako === 'undefined') {
+        setStatus('Error: pako library failed to load. Check browser console.');
+        return;
+    }
+    
+    // Verify Dos is loaded
+    if (typeof Dos === 'undefined') {
+        setStatus('Error: js-dos library failed to load. Check browser console.');
+        return;
+    }
     setStatus('Downloading disk image parts...');
     
     try {
@@ -200,7 +213,7 @@ async function downloadAndReassemble() {
         });
         
     } catch (err) {
-        setStatus('Error: ' + err.message + '\n' + err.stack);
+        setStatus('Error: ' + (err.message || 'Unknown error') + '\n' + (err.stack || ''));
     }
 }
         
