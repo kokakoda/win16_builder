@@ -6,20 +6,20 @@
     <title>Win16 Dev Environment</title>
     <script src="https://cdn.jsdelivr.net/npm/pako@2/dist/pako.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
+    <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
         :root { --bg:#0d0d0f; --surface:#141418; --border:#2a2a35; --accent:#00d4a0; --warn:#ffb300; --text:#d8d8e0; --muted:#5a5a6e; --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif; }
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family:var(--sans); background:var(--bg); color:var(--text); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
-        .topbar { display:flex; align-items:center; gap:12px; padding:0 16px; height:40px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; z-index:100; position:relative; }
-        .topbar-logo { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--accent); letter-spacing:0.05em; }
+        .topbar { display:flex; align-items:center; gap:12px; padding:0 16px; height:40px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+        .topbar-logo { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--accent); }
         .topbar-logo span { color:var(--muted); font-weight:400; }
         .topbar-sep { flex:1; }
         .topbar-badge { font-family:var(--mono); font-size:10px; padding:2px 8px; border:1px solid var(--border); border-radius:2px; color:var(--muted); }
         .workspace { display:flex; flex:1; overflow:hidden; }
         #dos-container { flex:1; background:#000; position:relative; overflow:hidden; }
-
-        /* Boot overlay — sits above the canvas until Windows is running */
         #boot-overlay { position:absolute; inset:0; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; z-index:20; transition:opacity 0.5s ease; }
         #boot-overlay.hidden { opacity:0; pointer-events:none; }
         .boot-title { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:0.15em; text-transform:uppercase; }
@@ -28,10 +28,6 @@
         .boot-progress-bar { height:2px; background:var(--border); border-radius:1px; overflow:hidden; }
         .boot-progress-fill { height:100%; background:var(--accent); width:0%; transition:width 0.3s ease; }
         .boot-log { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:center; max-width:340px; }
-
-        /* Hide ALL of js-dos v8's own UI chrome */
-        #dos-container > *:not(canvas):not(#boot-overlay) { display:none !important; }
-
         .sidebar { width:240px; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; overflow-y:auto; }
         .panel { border-bottom:1px solid var(--border); padding:14px; }
         .panel-title { font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
@@ -146,23 +142,8 @@ async function fetchPart(url, label, pStart, pEnd) {
     return out;
 }
 
-async function loadJsDos() {
-    // Dynamically load js-dos only after we've built the bundle,
-    // so it can't start multiplying before we're ready.
-    return new Promise(function(resolve, reject) {
-        // Load emulators.js (the low-level layer) directly from the js-dos CDN.
-        // This is what js-dos v7 used internally — it exposes Dos() on window
-        // without any UI shell or iframe spawning.
-        var s = document.createElement('script');
-        s.src = 'https://js-dos.com/6.22/current/js-dos.js';
-        s.onload  = function() { resolve(); };
-        s.onerror = function() { reject(new Error('Failed to load js-dos')); };
-        document.head.appendChild(s);
-    });
-}
-
 async function boot() {
-    log('Starting boot sequence…', 'dim');
+    log('Starting…', 'dim');
     try {
         const part1 = await fetchPart('win31.img.gz.aa', 'Part 1', 2, 30);
         const part2 = await fetchPart('win31.img.gz.ab', 'Part 2', 30, 55);
@@ -172,7 +153,7 @@ async function boot() {
         combined.set(part1, 0);
         combined.set(part2, part1.length);
         if (combined[0] !== 0x1f || combined[1] !== 0x8b)
-            throw new Error('Bad gzip header: ' + combined[0].toString(16) + ' ' + combined[1].toString(16));
+            throw new Error('Bad gzip header');
 
         setProgress('Decompressing', 58);
         log('Decompressing…', 'dim');
@@ -184,9 +165,15 @@ async function boot() {
         log('Building bundle…', 'dim');
         await new Promise(r => setTimeout(r, 30));
 
-        // js-dos 6.22 uses a .jsdos bundle which is a zip containing:
-        //   .jsdos/dosbox.conf  — the DOSBox config
-        //   <files>             — any files to place in the FS
+        // js-dos v8 bundle format:
+        //   jsdos.json        — metadata, must have "version":"8"
+        //   dosbox.conf       — DOSBox config read by the emulator
+        //   hdd.img           — disk image, available in FS root during autoexec
+        //
+        // The v8 worker iframe issue happens when Dos() is called with a div
+        // AND no workerUrl — it uses window.location as the worker, which
+        // re-loads our page. Fix: pass a dedicated workerUrl from the CDN.
+
         const dosboxConf = [
             "[dosbox]",
             "machine=svga_s3",
@@ -219,89 +206,66 @@ async function boot() {
         ].join("\r\n");
 
         const zip = new JSZip();
-        zip.file(".jsdos/dosbox.conf", dosboxConf);
-        zip.file("hdd.img", decompressed, { binary: true });
+        zip.file("jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
+        zip.file("dosbox.conf", dosboxConf);
+        zip.file("hdd.img",     decompressed, { binary: true });
 
         const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
         const bundleUrl   = URL.createObjectURL(new Blob([bundleBytes], { type: "application/zip" }));
         log('Bundle: ' + (bundleBytes.length/1024/1024).toFixed(0) + ' MB', 'ok');
 
-        setProgress('Loading emulator', 88);
-        await loadJsDos();
-        log('js-dos loaded', 'ok');
-
-        if (typeof Dos === 'undefined') throw new Error('Dos() not found after script load');
-
         setProgress('Starting emulator', 93);
         await new Promise(r => setTimeout(r, 100));
 
-        // js-dos 6.22 API: Dos(canvas, options)
-        // No UI shell, no iframes — renders directly to canvas.
+        if (typeof Dos === 'undefined') throw new Error('js-dos failed to load');
+
+        // Use a canvas element so v8 renders directly without injecting its UI shell.
+        // Also explicitly set workerUrl to the CDN worker so it never falls back
+        // to using window.location (which caused the page-multiplication loop).
         const canvas = document.createElement('canvas');
-        canvas.style.cssText = 'width:100%;height:100%;display:block;image-rendering:pixelated;';
+        canvas.style.cssText = 'width:100%;height:100%;display:block;';
         document.getElementById('dos-container').appendChild(canvas);
 
         Dos(canvas, {
-            wdosboxUrl: 'https://js-dos.com/6.22/current/wdosbox.js',
             url: bundleUrl,
-            onprogress: function(stage, total, loaded) {
-                if (total > 0) setProgress(stage, Math.round(93 + (loaded/total) * 5));
-            },
-        }).ready(function(fs, main) {
-            // fs is the Emscripten FS interface
-            // main() actually launches DOSBox — must be called explicitly
-            dosInstance = { fs: fs, main: main };
-
-            // Write hdd.img into the FS root so autoexec imgmount can find it.
-            // In 6.22, files added to the bundle zip are already in the FS by
-            // the time ready() fires, so hdd.img should already be there.
-            // We call main() with empty args to start DOSBox.
-            main([]).then(function() {
+            workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
+            onRun: function(ci) {
+                dosInstance = ci;
                 setProgress('Running', 100);
-                log('Windows 3.1 running', 'ok');
+                log('Running', 'ok');
                 document.getElementById('boot-overlay').classList.add('hidden');
                 importBtn.disabled = false;
                 exportBtn.disabled = false;
-            }).catch(function(err) {
-                log('main() failed: ' + err, 'err');
-            });
+            },
+            onError: function(err) {
+                log('Error: ' + (err && err.message ? err.message : String(err)), 'err');
+            }
         });
 
     } catch (err) {
-        log('BOOT FAILED: ' + err.message, 'err');
+        log('FAILED: ' + err.message, 'err');
         console.error(err);
         document.getElementById('boot-log').textContent = 'Failed: ' + err.message;
     }
 }
 
-function handleFileSelect(evt) {
-    const f = evt.target.files[0];
-    if (f) stageZip(f);
-}
-
+function handleFileSelect(evt) { const f = evt.target.files[0]; if (f) stageZip(f); }
 const dz = document.getElementById('dropZone');
 dz.addEventListener('dragover',  function(e) { e.preventDefault(); dz.classList.add('drag-over'); });
 dz.addEventListener('dragleave', function()  { dz.classList.remove('drag-over'); });
-dz.addEventListener('drop', function(e) {
-    e.preventDefault(); dz.classList.remove('drag-over');
-    var f = e.dataTransfer.files[0]; if (f) stageZip(f);
-});
+dz.addEventListener('drop', function(e) { e.preventDefault(); dz.classList.remove('drag-over'); var f = e.dataTransfer.files[0]; if (f) stageZip(f); });
 
 async function stageZip(file) {
     stagedFiles = {};
     try {
         const zip = await (new JSZip()).loadAsync(file);
         const ps = [];
-        zip.forEach(function(path, entry) {
-            if (!entry.dir) ps.push(entry.async('uint8array').then(function(d) { stagedFiles[path] = d; }));
-        });
+        zip.forEach(function(path, entry) { if (!entry.dir) ps.push(entry.async('uint8array').then(function(d) { stagedFiles[path] = d; })); });
         await Promise.all(ps);
         const keys = Object.keys(stagedFiles);
-        fileList.innerHTML = keys.length
-            ? keys.map(function(p) { return '<div title="' + p + '">· ' + p + '</div>'; }).join('')
-            : '<div class="file-list-empty">Empty ZIP</div>';
+        fileList.innerHTML = keys.length ? keys.map(function(p) { return '<div title="'+p+'">· '+p+'</div>'; }).join('') : '<div class="file-list-empty">Empty ZIP</div>';
         importBtn.disabled = !dosInstance;
-        log('Staged ' + keys.length + ' file(s) from ' + file.name, 'ok');
+        log('Staged ' + keys.length + ' file(s)', 'ok');
     } catch(e) { log('ZIP error: ' + e.message, 'err'); }
 }
 
@@ -310,10 +274,8 @@ async function importFiles() {
     var ok = 0, fail = 0;
     for (const [path, data] of Object.entries(stagedFiles)) {
         const dosPath = 'C:\\SRC\\' + path.replace(/\//g, '\\').replace(/^\\/, '');
-        try {
-            dosInstance.fs.createFile(dosPath, data);
-            ok++;
-        } catch(e) { log('  x ' + path + ': ' + e.message, 'err'); fail++; }
+        try { await dosInstance.fs.createFile(dosPath, data); ok++; }
+        catch(e) { log('x ' + path + ': ' + e.message, 'err'); fail++; }
     }
     log('Import: ' + ok + ' ok, ' + fail + ' failed', ok ? 'ok' : 'err');
 }
@@ -322,19 +284,18 @@ async function exportFiles() {
     if (!dosInstance) return;
     exportBtn.disabled = true;
     try {
-        const files = dosInstance.fs.readDir('C:\\EXPORT');
-        if (!files || !files.length) { log('C:\\EXPORT\\ empty or missing', 'warn'); exportBtn.disabled = false; return; }
+        const entries = await dosInstance.fs.readDirectory('C:\\EXPORT');
+        if (!entries || !entries.length) { log('C:\\EXPORT\\ empty', 'warn'); exportBtn.disabled = false; return; }
         const zip = new JSZip();
-        for (const name of files) {
-            zip.file(name, dosInstance.fs.readFile('C:\\EXPORT\\' + name));
+        for (const e of entries) {
+            if (e.isDirectory) continue;
+            zip.file(e.name, await dosInstance.fs.readFile('C:\\EXPORT\\' + e.name));
         }
         const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'win16_export.zip';
-        a.click();
+        a.href = URL.createObjectURL(blob); a.download = 'win16_export.zip'; a.click();
         URL.revokeObjectURL(a.href);
-        log('Exported ' + files.length + ' file(s)', 'ok');
+        log('Exported ' + entries.length + ' file(s)', 'ok');
     } catch(e) { log('Export error: ' + e.message, 'err'); }
     exportBtn.disabled = false;
 }
