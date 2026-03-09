@@ -20,7 +20,7 @@
         .topbar-badge { font-family:var(--mono); font-size:10px; padding:2px 8px; border:1px solid var(--border); border-radius:2px; color:var(--muted); }
         .workspace { display:flex; flex:1; overflow:hidden; }
         #dos-container { flex:1; background:#000; position:relative; overflow:hidden; }
-        #boot-overlay { position:absolute; inset:0; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; z-index:20; transition:opacity 0.5s ease; }
+        #boot-overlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; z-index:100; transition:opacity 0.5s ease; }
         #boot-overlay.hidden { opacity:0; pointer-events:none; }
         .boot-title { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:0.15em; text-transform:uppercase; }
         .boot-progress-wrap { width:300px; }
@@ -57,22 +57,21 @@
     </style>
 </head>
 <body>
+<div id="boot-overlay">
+    <div class="boot-title">Initialising Environment</div>
+    <div class="boot-progress-wrap">
+        <div class="boot-progress-label"><span id="prog-stage">Standby</span><span id="prog-pct">0%</span></div>
+        <div class="boot-progress-bar"><div class="boot-progress-fill" id="prog-fill"></div></div>
+    </div>
+    <div class="boot-log" id="boot-log">—</div>
+</div>
 <div class="topbar">
     <div class="topbar-logo">WIN16<span>/DEV</span></div>
     <div class="topbar-sep"></div>
     <div class="topbar-badge">BC++ 4.0 · Win 3.1</div>
 </div>
 <div class="workspace">
-    <div id="dos-container">
-        <div id="boot-overlay">
-            <div class="boot-title">Initialising Environment</div>
-            <div class="boot-progress-wrap">
-                <div class="boot-progress-label"><span id="prog-stage">Standby</span><span id="prog-pct">0%</span></div>
-                <div class="boot-progress-bar"><div class="boot-progress-fill" id="prog-fill"></div></div>
-            </div>
-            <div class="boot-log" id="boot-log">—</div>
-        </div>
-    </div>
+    <div id="dos-container"></div>
     <div class="sidebar">
         <div class="panel">
             <div class="panel-title">Import</div>
