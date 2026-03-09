@@ -206,9 +206,10 @@ async function boot() {
             "echo If this hangs, type: imgmount c hdd.img -t hdd -fs fat"
         ].join("\r\n");
 
+        // v8 bundle format: config files must be in the .jsdos/ subdirectory
         const zip = new JSZip();
-        zip.file("jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
-        zip.file("dosbox.conf", dosboxConf);
+        zip.file(".jsdos/jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
+        zip.file(".jsdos/dosbox.conf", dosboxConf);
 
         const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
         const bundleBlob  = new Blob([bundleBytes], { type: "application/zip" });
