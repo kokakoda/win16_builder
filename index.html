@@ -242,24 +242,20 @@ async function boot() {
         // The "run" event fires when DOSBox is up and the CommandInterface is ready.
         log('Waiting for DOSBox run event…', 'dim');
 
-        const realCI = await new Promise(function(resolve, reject) {
-            // events() returns a subscriber — listen for "run"
-            try {
-                ci.events().onRun(function(commandInterface) {
+        // setFrame(fn) is v8's way to deliver the CommandInterface.
+        // It calls fn({ ci: commandInterface }) when DOSBox is ready.
+        // This is the only hook available from the DosInstance keys we logged.
+        ci.setAutoStart(true);
+
+        const realCI = await new Promise(function(resolve) {
+            ci.setFrame(function(props) {
+                // props may be the CI directly, or { ci } — handle both
+                const commandInterface = (props && props.ci) ? props.ci : props;
+                if (commandInterface && typeof commandInterface === 'object') {
+                    ci.setFrame(null);
                     resolve(commandInterface);
-                });
-            } catch(e) {
-                // Fallback: try event emitter pattern
-                try {
-                    ci.events().on('run', function(commandInterface) {
-                        resolve(commandInterface);
-                    });
-                } catch(e2) {
-                    reject(new Error('No events API: ' + e.message + ' / ' + e2.message));
                 }
-            }
-            // Trigger start
-            ci.setAutoStart(true);
+            });
         });
 
         console.log('realCI:', realCI);
@@ -267,7 +263,6 @@ async function boot() {
         dosInstance = realCI;
         log('DOSBox running', 'ok');
 
-        // Write hdd.img into the emulator FS then mount and launch Windows
         const fsObj   = realCI.fs   || (realCI.getFs   && realCI.getFs());
         const shellFn = realCI.shell || realCI.sendCommand || realCI.run;
 
@@ -279,7 +274,7 @@ async function boot() {
                 log('hdd.img written', 'ok');
             } catch(e) { log('writeFile: ' + e.message, 'warn'); }
         } else {
-            log('No fs.writeFile on realCI', 'warn');
+            log('No fs.writeFile — realCI keys: ' + Object.keys(realCI).join(', '), 'warn');
         }
 
         if (shellFn) {
@@ -292,7 +287,7 @@ async function boot() {
             await send("cd windows");
             await send("win.com");
         } else {
-            log('No shell fn on realCI', 'err');
+            log('No shell fn — realCI keys: ' + Object.keys(realCI).join(', '), 'err');
         }
 
         setProgress('Running', 100);
