@@ -192,10 +192,14 @@
                 
                 Dos(document.getElementById('dos'), {
                     url: imageUrl,
-                }).ready((dos) => {
-                    dosInstance = dos;
-                    setStatus('Windows 3.1 booted. Ready for import/export.');
-                    exportBtn.disabled = false;
+                    onRun: (ci) => {
+                        dosInstance = ci;
+                        setStatus('Windows 3.1 booted. Ready for import/export.');
+                        exportBtn.disabled = false;
+                    },
+                    onError: (error) => {
+                        setStatus('Dos error: ' + error);
+                    }
                 });
                 
             } catch (err) {
@@ -225,7 +229,7 @@
                     fileCount++;
                 }
                 
-                setStatus(`Imported ${fileCount} files to C:\\IMPORT\\\nOpen File Manager in Win3.1 to access them.`);
+                setStatus(`Imported ${fileCount} files.\nManual import required in DOS session.`);
                 fileInput.value = '';
             } catch (err) {
                 setStatus('Import error: ' + err.message);
