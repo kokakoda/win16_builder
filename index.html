@@ -248,12 +248,23 @@ async function boot() {
                 if (total > 0) setProgress(stage, Math.round(93 + (loaded/total) * 5));
             },
         }).ready(function(fs, main) {
+            // fs is the Emscripten FS interface
+            // main() actually launches DOSBox — must be called explicitly
             dosInstance = { fs: fs, main: main };
-            setProgress('Running', 100);
-            log('Windows 3.1 running', 'ok');
-            document.getElementById('boot-overlay').classList.add('hidden');
-            importBtn.disabled = false;
-            exportBtn.disabled = false;
+
+            // Write hdd.img into the FS root so autoexec imgmount can find it.
+            // In 6.22, files added to the bundle zip are already in the FS by
+            // the time ready() fires, so hdd.img should already be there.
+            // We call main() with empty args to start DOSBox.
+            main([]).then(function() {
+                setProgress('Running', 100);
+                log('Windows 3.1 running', 'ok');
+                document.getElementById('boot-overlay').classList.add('hidden');
+                importBtn.disabled = false;
+                exportBtn.disabled = false;
+            }).catch(function(err) {
+                log('main() failed: ' + err, 'err');
+            });
         });
 
     } catch (err) {
