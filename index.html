@@ -174,6 +174,10 @@ async function boot() {
         // AND no workerUrl — it uses window.location as the worker, which
         // re-loads our page. Fix: pass a dedicated workerUrl from the CDN.
 
+        // Keep the bundle tiny — just config, no disk image.
+        // Transferring 504 MB to a worker via postMessage stalls indefinitely.
+        // Instead we write hdd.img into the FS via ci.fs after onRun fires,
+        // then drive the mount+boot sequence via ci.shell() commands.
         const dosboxConf = [
             "[dosbox]",
             "machine=svga_s3",
@@ -197,21 +201,18 @@ async function boot() {
             "oplmode=auto",
             "",
             "[autoexec]",
-            "z:",
-            "mount -u c",
-            "imgmount c hdd.img -t hdd -fs fat",
-            "c:",
-            "cd windows",
-            "win.com"
+            "@echo off",
+            "echo Win16/DEV ready. Mounting disk image...",
+            "echo If this hangs, type: imgmount c hdd.img -t hdd -fs fat"
         ].join("\r\n");
 
         const zip = new JSZip();
         zip.file("jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
         zip.file("dosbox.conf", dosboxConf);
-        zip.file("hdd.img",     decompressed, { binary: true });
+        // hdd.img is NOT in the bundle — we write it after init via ci.fs
 
-        const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-        log('Bundle: ' + (bundleBytes.length/1024/1024).toFixed(0) + ' MB', 'ok');
+        const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+        log('Bundle: ' + (bundleBytes.length/1024).toFixed(0) + ' KB (config only)', 'ok');
 
         setProgress('Starting emulator', 93);
         await new Promise(r => setTimeout(r, 100));
@@ -228,25 +229,53 @@ async function boot() {
         // Store the Dos() promise in a variable so it isn't GC'd before
         // the worker responds — Firefox throws "Promised response from
         // onMessage listener went out of scope" if nothing holds the reference.
+        const bundleBuffer = bundleBytes.buffer.slice(0);
+
         const dosPromise = Dos(canvas, {
-            bundle: bundleBytes.buffer,
+            bundle: bundleBuffer,
             workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
-            // Disable IDB bundle caching — v8 tries to store the entire bundle
-            // in IndexedDB which fails at 504 MB due to storage quota limits.
             noCacheDb: true,
             noCloud: true,
-            onRun: function(ci) {
+            onRun: async function(ci) {
+                clearTimeout(stallTimer);
                 dosInstance = ci;
+                setProgress('Writing disk image', 95);
+                log('Writing hdd.img to emulator FS…', 'dim');
+                try {
+                    // ci.fs.writeFile path must be absolute in the Emscripten FS
+                    await ci.fs.writeFile("/hdd.img", decompressed);
+                    log('hdd.img written', 'ok');
+                } catch(e) {
+                    log('writeFile failed: ' + e.message, 'err');
+                }
+                // Drive the mount + boot sequence via shell commands
+                setProgress('Mounting image', 97);
+                log('Mounting disk image…', 'dim');
+                await ci.shell("z:");
+                await ci.shell("mount -u c");
+                await ci.shell("imgmount c hdd.img -t hdd -fs fat");
+                await ci.shell("c:");
+                await ci.shell("cd windows");
+                await ci.shell("win.com");
                 setProgress('Running', 100);
-                log('Running', 'ok');
+                log('Windows 3.1 launched', 'ok');
                 document.getElementById('boot-overlay').classList.add('hidden');
                 importBtn.disabled = false;
                 exportBtn.disabled = false;
             },
             onError: function(err) {
+                clearTimeout(stallTimer);
                 log('Error: ' + (err && err.message ? err.message : String(err)), 'err');
             }
         });
+
+        // Warn if emulator hasn't started within 60s — helps diagnose stalls
+        const stallTimer = setTimeout(function() {
+            if (!dosInstance) {
+                log('WARNING: emulator still not running after 60s', 'warn');
+                log('Check browser console for worker errors', 'warn');
+            }
+        }, 60000);
 
     } catch (err) {
         log('FAILED: ' + err.message, 'err');
