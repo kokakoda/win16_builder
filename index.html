@@ -202,8 +202,11 @@ async function boot() {
             "",
             "[autoexec]",
             "@echo off",
-            "echo Win16/DEV ready. Mounting disk image...",
-            "echo If this hangs, type: imgmount c hdd.img -t hdd -fs fat"
+            "echo Mounting disk image...",
+            "imgmount c hdd.img -t hdd -fs fat",
+            "c:",
+            "cd windows",
+            "win.com"
         ].join("\r\n");
 
         // v8 bundle format: config files must be in the .jsdos/ subdirectory
@@ -240,6 +243,8 @@ async function boot() {
                     noCacheDb: true,
                     noCloud: true,
                     autoStart: true,
+                    // initFs injects files into the FS before autoexec runs
+                    initFs: [{ path: "hdd.img", contents: decompressed }],
                     onEvent: function(event, arg) {
                         log('DosEvent: ' + event, 'dim');
                         if (event === 'ci-ready') {
@@ -252,28 +257,12 @@ async function boot() {
             }
         });
 
-        console.log('realCI:', realCI);
-        log('CI ready, keys: ' + Object.keys(realCI).join(', '), 'dim');
         dosInstance = realCI;
-        log('DOSBox running', 'ok');
-
-        // Write hdd.img using official fsWriteFile API
-        setProgress('Writing disk image', 95);
-        log('Writing hdd.img (' + (decompressed.length/1024/1024).toFixed(0) + ' MB)…', 'dim');
-        await realCI.fsWriteFile("hdd.img", decompressed);
-        log('hdd.img written', 'ok');
-
-        // Mount and launch Windows
-        setProgress('Mounting', 97);
-        await realCI.shell("z:");
-        await realCI.shell("mount -u c");
-        await realCI.shell("imgmount c hdd.img -t hdd -fs fat");
-        await realCI.shell("c:");
-        await realCI.shell("cd windows");
-        await realCI.shell("win.com");
+        log('DOSBox running — Windows should be booting', 'ok');
+        // hdd.img was injected via initFs before autoexec ran.
+        // The autoexec handles: imgmount c hdd.img → c: → cd windows → win.com
 
         setProgress('Running', 100);
-        log('Windows 3.1 launched', 'ok');
         document.getElementById('boot-overlay').classList.add('hidden');
         importBtn.disabled = false;
         exportBtn.disabled = false;
