@@ -118,7 +118,7 @@ function setProgress(stage, pct) {
     document.getElementById('prog-stage').textContent = stage;
     document.getElementById('prog-pct').textContent   = pct + '%';
     document.getElementById('prog-fill').style.width  = pct + '%';
-    document.getElementById('boot-log').textContent   = stage;
+    const _bl = document.getElementById('boot-log'); if (_bl) _bl.textContent = stage;
 }
 
 async function fetchPart(url, label, pStart, pEnd) {
@@ -255,14 +255,19 @@ async function boot() {
         await realCI.fsWriteFile("hdd.img", decompressed);
         log('hdd.img written — sending commands…', 'ok');
 
-        // Type a command string into DOSBox followed by Enter
+        // Send a command to DOSBox via clipboard paste + Enter
         async function typeCommand(ci, cmd) {
-            // Small delay so DOSBox is ready for input
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 400));
+            // Try clipboard paste event first (most reliable in v8)
+            try {
+                ci.sendBackendEvent({ type: "clipboardPaste", text: cmd + "\n" });
+                return;
+            } catch(e) { /* fall through */ }
+            // Fallback: simulateKeyPress per character
             for (const ch of cmd) {
                 const code = ch.toUpperCase().charCodeAt(0);
                 ci.simulateKeyPress(code);
-                await new Promise(r => setTimeout(r, 20));
+                await new Promise(r => setTimeout(r, 30));
             }
             ci.simulateKeyPress(13); // Enter
         }
