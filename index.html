@@ -211,8 +211,12 @@ async function boot() {
         zip.file("dosbox.conf", dosboxConf);
         // hdd.img is NOT in the bundle — we write it after init via ci.fs
 
-        const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-        log('Bundle: ' + (bundleBytes.length/1024).toFixed(0) + ' KB (config only)', 'ok');
+        // Use a proper blob URL for the tiny config bundle — safe for IDB at ~2KB.
+        // Do NOT use bundleBytes.buffer directly: JSZip's underlying ArrayBuffer
+        // is oversized; slice to the exact length first.
+        const bundleBlob = new Blob([bundleBytes.buffer.slice(0, bundleBytes.length)], { type: "application/zip" });
+        const bundleUrl  = URL.createObjectURL(bundleBlob);
+        log('Bundle: ' + (bundleBlob.size/1024).toFixed(1) + ' KB → ' + bundleUrl, 'ok');
 
         setProgress('Starting emulator', 93);
         await new Promise(r => setTimeout(r, 100));
@@ -223,19 +227,12 @@ async function boot() {
         canvas.style.cssText = 'width:100%;height:100%;display:block;';
         document.getElementById('dos-container').appendChild(canvas);
 
-        // v8 caches bundles in IndexedDB by URL — a 504 MB blob URL blows the
-        // IDB quota and throws "Can't put key blob:...". Fix: pass the bytes
-        // directly via the `bundle` option (ArrayBuffer), bypassing IDB entirely.
-        // Store the Dos() promise in a variable so it isn't GC'd before
-        // the worker responds — Firefox throws "Promised response from
-        // onMessage listener went out of scope" if nothing holds the reference.
-        // v8 Dos() returns a Promise<CommandInterface> — await it directly.
-        // onRun/onError are not valid v8 options; the promise resolves when
-        // the emulator is ready.
+        // Dos() resolves to a DosInstance (settings object).
+        // setAutoStart(true) ensures DOSBox starts executing immediately.
         let ci;
         try {
             ci = await Dos(canvas, {
-                bundle: bundleBytes.buffer.slice(0),
+                url: bundleUrl,
                 workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
                 noCacheDb: true,
                 noCloud: true,
@@ -243,6 +240,7 @@ async function boot() {
         } catch(dosErr) {
             throw new Error('Dos() failed: ' + dosErr.message);
         }
+        ci.setAutoStart(true);
 
         // ci is the v8 DosInstance (settings object).
         // The actual CommandInterface with fs/shell is delivered via setFrame().
@@ -252,35 +250,46 @@ async function boot() {
 
         const realCI = await new Promise(function(resolve) {
             ci.setFrame(function(commandInterface) {
-                // Clear the callback immediately — we only need it once
                 ci.setFrame(null);
                 resolve(commandInterface);
             });
         });
 
+        // Log the real CI shape
+        const rciKeys = Object.keys(realCI).join(', ');
         console.log('realCI:', realCI);
-        log('CI keys: ' + Object.keys(realCI).join(', '), 'dim');
+        log('realCI keys: ' + rciKeys, 'dim');
 
         dosInstance = realCI;
         log('Command interface ready', 'ok');
 
-        setProgress('Writing disk image', 95);
-        log('Writing hdd.img to emulator FS…', 'dim');
-        try {
-            await realCI.fs.writeFile("/hdd.img", decompressed);
-            log('hdd.img written', 'ok');
-        } catch(e) {
-            log('writeFile failed: ' + e.message, 'err');
+        // Try all known FS write methods
+        const fsObj = realCI.fs || realCI.getFs && realCI.getFs();
+        if (fsObj && fsObj.writeFile) {
+            setProgress('Writing disk image', 95);
+            log('Writing hdd.img…', 'dim');
+            try {
+                await fsObj.writeFile("/hdd.img", decompressed);
+                log('hdd.img written', 'ok');
+            } catch(e) { log('writeFile err: ' + e.message, 'warn'); }
+        } else {
+            log('fs.writeFile not found — keys: ' + rciKeys, 'warn');
         }
 
-        setProgress('Mounting image', 97);
-        log('Mounting…', 'dim');
-        await realCI.shell("z:");
-        await realCI.shell("mount -u c");
-        await realCI.shell("imgmount c hdd.img -t hdd -fs fat");
-        await realCI.shell("c:");
-        await realCI.shell("cd windows");
-        await realCI.shell("win.com");
+        // Try all known shell/command methods  
+        const shellFn = realCI.shell || realCI.sendCommand || realCI.run;
+        if (shellFn) {
+            setProgress('Mounting image', 97);
+            const send = shellFn.bind(realCI);
+            await send("z:");
+            await send("mount -u c");
+            await send("imgmount c hdd.img -t hdd -fs fat");
+            await send("c:");
+            await send("cd windows");
+            await send("win.com");
+        } else {
+            log('No shell method — keys: ' + rciKeys, 'err');
+        }
 
         setProgress('Running', 100);
         log('Windows 3.1 launched', 'ok');
