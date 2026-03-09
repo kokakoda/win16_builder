@@ -225,9 +225,16 @@ async function boot() {
         // v8 caches bundles in IndexedDB by URL — a 504 MB blob URL blows the
         // IDB quota and throws "Can't put key blob:...". Fix: pass the bytes
         // directly via the `bundle` option (ArrayBuffer), bypassing IDB entirely.
-        Dos(canvas, {
+        // Store the Dos() promise in a variable so it isn't GC'd before
+        // the worker responds — Firefox throws "Promised response from
+        // onMessage listener went out of scope" if nothing holds the reference.
+        const dosPromise = Dos(canvas, {
             bundle: bundleBytes.buffer,
             workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
+            // Disable IDB bundle caching — v8 tries to store the entire bundle
+            // in IndexedDB which fails at 504 MB due to storage quota limits.
+            noCacheDb: true,
+            noCloud: true,
             onRun: function(ci) {
                 dosInstance = ci;
                 setProgress('Running', 100);
