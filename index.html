@@ -178,6 +178,8 @@ async function boot() {
                     noCacheDb: true,
                     noCloud: true,
                     autoStart: true,
+                    imageRendering: "smooth",
+                    renderAspect: "4/3",
                     onEvent: function(event, arg) {
                         log('DosEvent: ' + event, 'dim');
                         if (event === 'ci-ready') { resolve(arg); }
