@@ -432,7 +432,7 @@
                     "memsize=64",
                     "",
                     "[cpu]",
-                    "cputype=pentium",
+                    "cputype=486",
                     "cycles=max",
                     "",
                     "[dos]",
@@ -451,6 +451,7 @@
                     "",
                     "[autoexec]",
                     "@echo off",
+                    "imgmount c hdd.img"
                     "boot -l c"
                 ].join("\n"),
                 hardware: {
