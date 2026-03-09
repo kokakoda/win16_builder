@@ -263,12 +263,14 @@ async function boot() {
 
         // go.bat is already in the bundle on Z:\ — just type its name + Enter
         setProgress('Launching', 97);
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 1000));
         realCI.simulateKeyPress(71); // G
-        await new Promise(r => setTimeout(r, 60));
+        await new Promise(r => setTimeout(r, 150));
         realCI.simulateKeyPress(79); // O
-        await new Promise(r => setTimeout(r, 60));
-        realCI.simulateKeyPress(13); // Enter
+        await new Promise(r => setTimeout(r, 300));
+        realCI.simulateKeyPress(13); // Enter (keyCode 13 = Return)
+        await new Promise(r => setTimeout(r, 100));
+        realCI.simulateKeyPress(10); // also try LF just in case
 
         setProgress('Running', 100);
         log('Boot sequence sent', 'ok');
