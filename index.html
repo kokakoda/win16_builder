@@ -429,16 +429,22 @@
                 emulatorVersion: "8",
                 config: [
                     "[dosbox]",
-                    "memsize=64",
+                    "machine=svga_s3",
+                    "memsize=16",
                     "",
                     "[cpu]",
-                    "cputype=pentium",
-                    "cycles=max",
+                    "cputype=386",
+                    "cycles=25000",
+                    "cycleup=500",
+                    "cycledown=20",
                     "",
                     "[dos]",
                     "xms=true",
                     "ems=true",
                     "umb=true",
+                    "",
+                    "[pci]",
+                    "voodoo=false",
                     "",
                     "[sblaster]",
                     "sbtype=sb16",
@@ -450,14 +456,14 @@
                     "oplemu=default",
                     "",
                     "[autoexec]",
-                    "@echo off",
-                    "boot -l c"
+                    "imgmount c hdd.img -t hdd -fs fat",
+                    "boot c:"
                 ].join("\n"),
                 hardware: {
                     cpu: "386",
                     vgaCard: "svga_s3",
                     machineType: "svga_s3",
-                    memSize: 64
+                    memSize: 16
                 }
             };
 
