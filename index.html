@@ -177,6 +177,14 @@ async function boot() {
         // Transferring 504 MB to a worker via postMessage stalls indefinitely.
         // Instead we write hdd.img into the FS via ci.fs after onRun fires,
         // then drive the mount+boot sequence via ci.shell() commands.
+        const goScript = [
+            "@echo off",
+            "imgmount c hdd.img -t hdd -fs fat",
+            "c:",
+            "cd windows",
+            "win.com"
+        ].join("\r\n");
+
         const dosboxConf = [
             "[dosbox]",
             "machine=svga_s3",
@@ -201,14 +209,13 @@ async function boot() {
             "",
             "[autoexec]",
             "@echo off",
-            "echo Mounting disk image...",
             "echo Ready."
         ].join("\r\n");
 
-        // v8 bundle format: config files must be in the .jsdos/ subdirectory
         const zip = new JSZip();
         zip.file(".jsdos/jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
         zip.file(".jsdos/dosbox.conf", dosboxConf);
+        zip.file("go.bat", goScript);
 
         const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
         const bundleBlob  = new Blob([bundleBytes], { type: "application/zip" });
@@ -254,22 +261,7 @@ async function boot() {
         await realCI.fsWriteFile("hdd.img", decompressed);
         log('hdd.img written — sending commands…', 'ok');
 
-        // Type a command into DOSBox using simulateKeyPress.
-        // simulateKeyPress takes JS keyCodes (uppercase ASCII for letters).
-        // Special chars: space=32, colon=186, dot=190, dash=189, slash=191
-        // Write a batch file then just type its short name + Enter.
-        // This avoids special-character keycode issues entirely.
-        const bat = [
-            "@echo off",
-            "imgmount c hdd.img -t hdd -fs fat",
-            "c:",
-            "cd windows",
-            "win.com"
-        ].join("\r\n");
-        await realCI.fsWriteFile("go.bat", new TextEncoder().encode(bat));
-        log('go.bat written', 'ok');
-
-        // Type "go" + Enter — only letters and Enter, no special chars needed
+        // go.bat is already in the bundle on Z:\ — just type its name + Enter
         setProgress('Launching', 97);
         await new Promise(r => setTimeout(r, 800));
         realCI.simulateKeyPress(71); // G
