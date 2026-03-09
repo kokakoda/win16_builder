@@ -211,7 +211,6 @@ async function boot() {
         zip.file("hdd.img",     decompressed, { binary: true });
 
         const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-        const bundleUrl   = URL.createObjectURL(new Blob([bundleBytes], { type: "application/zip" }));
         log('Bundle: ' + (bundleBytes.length/1024/1024).toFixed(0) + ' MB', 'ok');
 
         setProgress('Starting emulator', 93);
@@ -219,15 +218,15 @@ async function boot() {
 
         if (typeof Dos === 'undefined') throw new Error('js-dos failed to load');
 
-        // Use a canvas element so v8 renders directly without injecting its UI shell.
-        // Also explicitly set workerUrl to the CDN worker so it never falls back
-        // to using window.location (which caused the page-multiplication loop).
         const canvas = document.createElement('canvas');
         canvas.style.cssText = 'width:100%;height:100%;display:block;';
         document.getElementById('dos-container').appendChild(canvas);
 
+        // v8 caches bundles in IndexedDB by URL — a 504 MB blob URL blows the
+        // IDB quota and throws "Can't put key blob:...". Fix: pass the bytes
+        // directly via the `bundle` option (ArrayBuffer), bypassing IDB entirely.
         Dos(canvas, {
-            url: bundleUrl,
+            bundle: bundleBytes.buffer,
             workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
             onRun: function(ci) {
                 dosInstance = ci;
