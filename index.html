@@ -224,20 +224,14 @@ async function boot() {
 
         if (typeof Dos === 'undefined') throw new Error('js-dos failed to load');
 
-        const canvas = document.createElement('canvas');
-        canvas.style.cssText = 'width:100%;height:100%;display:block;';
-        document.getElementById('dos-container').appendChild(canvas);
-
-        // Official v8 API: onEvent callback in Dos() options.
-        // "ci-ready" event delivers the CommandInterface (ci).
-        // CI FS methods: ci.fsWriteFile(path, uint8), ci.fsReadFile(path), ci.fsTree()
-        // CI shell: ci.shell(command)
-        // After writing files, must remount the drive to see changes.
+        // v8 Dos() takes the container element (div), not a canvas.
+        // It creates its own canvas internally and renders into the div.
+        const dosContainer = document.getElementById('dos-container');
         log('Starting DOSBox with onEvent handler…', 'dim');
 
         const realCI = await new Promise(function(resolve, reject) {
             try {
-                Dos(canvas, {
+                Dos(dosContainer, {
                     url: bundleUrl,
                     workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
                     noCacheDb: true,
