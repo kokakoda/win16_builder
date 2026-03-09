@@ -153,59 +153,80 @@
             statusEl.scrollTop = statusEl.scrollHeight;
         }
         
-        async function downloadAndReassemble() {
-            setStatus('Downloading disk image parts...');
-            
-            try {
-                setStatus('Fetching part 1...');
-                const response1 = await fetch('win31.img.gz.aa');
-                if (!response1.ok) {
-                    setStatus('Error: Failed to fetch win31.img.gz.aa (HTTP ' + response1.status + ')');
-                    return;
-                }
-                const part1 = await response1.arrayBuffer();
-                setStatus('Part 1 fetched (' + (part1.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
-                
-                setStatus('Fetching part 2...');
-                const response2 = await fetch('win31.img.gz.ab');
-                if (!response2.ok) {
-                    setStatus('Error: Failed to fetch win31.img.gz.ab (HTTP ' + response2.status + ')');
-                    return;
-                }
-                const part2 = await response2.arrayBuffer();
-                setStatus('Part 2 fetched (' + (part2.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
-                
-                setStatus('Reassembling compressed image...');
-                const combined = new Uint8Array(part1.byteLength + part2.byteLength);
-                combined.set(new Uint8Array(part1), 0);
-                combined.set(new Uint8Array(part2), part1.byteLength);
-                setStatus('Image reassembled (' + (combined.length / 1024 / 1024).toFixed(2) + ' MB)');
-                
-                setStatus('Decompressing (this may take a minute)...');
-                const decompressed = pako.inflate(combined);
-                setStatus('Decompression complete (' + (decompressed.length / 1024 / 1024).toFixed(2) + ' MB)');
-                
-                const blob = new Blob([decompressed], { type: 'application/octet-stream' });
-                const imageUrl = URL.createObjectURL(blob);
-                
-                setStatus('Booting Windows 3.1...');
-                
-                Dos(document.getElementById('dos'), {
-                    url: imageUrl,
-                    onRun: (ci) => {
-                        dosInstance = ci;
-                        setStatus('Windows 3.1 booted. Ready for import/export.');
-                        exportBtn.disabled = false;
-                    },
-                    onError: (error) => {
-                        setStatus('Dos error: ' + error);
-                    }
-                });
-                
-            } catch (err) {
-                setStatus('Error: ' + (err.message || 'Unknown error') + '\nStack: ' + (err.stack || 'N/A'));
-            }
+async function downloadAndReassemble() {
+    setStatus('Downloading disk image parts...');
+    
+    try {
+        setStatus('Fetching part 1...');
+        const response1 = await fetch('win31.img.gz.aa');
+        if (!response1.ok) {
+            setStatus('Error: Failed to fetch win31.img.gz.aa (HTTP ' + response1.status + ')');
+            return;
         }
+        const part1 = await response1.arrayBuffer();
+        setStatus('Part 1 fetched (' + (part1.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
+        
+        setStatus('Fetching part 2...');
+        const response2 = await fetch('win31.img.gz.ab');
+        if (!response2.ok) {
+            setStatus('Error: Failed to fetch win31.img.gz.ab (HTTP ' + response2.status + ')');
+            return;
+        }
+        const part2 = await response2.arrayBuffer();
+        setStatus('Part 2 fetched (' + (part2.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
+        
+        setStatus('Reassembling compressed image...');
+        const combined = new Uint8Array(part1.byteLength + part2.byteLength);
+        combined.set(new Uint8Array(part1), 0);
+        combined.set(new Uint8Array(part2), part1.byteLength);
+        setStatus('Image reassembled (' + (combined.length / 1024 / 1024).toFixed(2) + ' MB)');
+        
+        setStatus('Decompressing (this may take a minute)...');
+        let decompressed;
+        try {
+            decompressed = pako.inflate(combined);
+        } catch (decompErr) {
+            setStatus('Decompression failed: ' + decompErr.message);
+            console.error('Pako error:', decompErr);
+            return;
+        }
+        setStatus('Decompression complete (' + (decompressed.length / 1024 / 1024).toFixed(2) + ' MB)');
+        
+        // Create blob and URL
+        const blob = new Blob([decompressed], { type: 'application/octet-stream' });
+        const imageUrl = URL.createObjectURL(blob);
+        
+        setStatus('Image blob created, size: ' + (blob.size / 1024 / 1024).toFixed(2) + ' MB\nInitializing emulator...');
+        
+        // Small delay to let the browser breathe
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        setStatus('Booting Windows 3.1...');
+        
+        // Wrap Dos() call with explicit error handling
+        try {
+            Dos(document.getElementById('dos'), {
+                url: imageUrl,
+                onRun: (ci) => {
+                    dosInstance = ci;
+                    setStatus('✓ Windows 3.1 booted. Ready for work.');
+                    exportBtn.disabled = false;
+                },
+                onError: (error) => {
+                    setStatus('DOS runtime error: ' + (error.message || JSON.stringify(error)));
+                    console.error('DOS error object:', error);
+                }
+            });
+        } catch (dosErr) {
+            setStatus('Dos() initialization threw: ' + dosErr.message + '\n' + dosErr.stack);
+            console.error('Dos() error:', dosErr);
+        }
+        
+    } catch (err) {
+        setStatus('Error: ' + (err.message || 'Unknown error') + '\nStack: ' + (err.stack || 'N/A'));
+        console.error('Outer error:', err);
+    }
+}
         
         async function importFiles() {
             const fileInput = document.getElementById('uploadZip');
