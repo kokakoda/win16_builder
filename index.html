@@ -254,19 +254,17 @@ async function boot() {
         await realCI.fsWriteFile("hdd.img", decompressed);
         log('hdd.img written — sending commands…', 'ok');
 
-        // Send a command to DOSBox via clipboard paste + Enter
+        // Type a command into DOSBox using simulateKeyPress.
+        // simulateKeyPress takes JS keyCodes (uppercase ASCII for letters).
+        // Special chars: space=32, colon=186, dot=190, dash=189, slash=191
+        const keyMap = { ' ':32, ':':186, '.':190, '-':189, '/':191 };
         async function typeCommand(ci, cmd) {
-            await new Promise(r => setTimeout(r, 400));
-            // Try clipboard paste event first (most reliable in v8)
-            try {
-                ci.sendBackendEvent({ type: "clipboardPaste", text: cmd + "\n" });
-                return;
-            } catch(e) { /* fall through */ }
-            // Fallback: simulateKeyPress per character
+            await new Promise(r => setTimeout(r, 500));
             for (const ch of cmd) {
-                const code = ch.toUpperCase().charCodeAt(0);
+                const code = keyMap[ch] !== undefined ? keyMap[ch]
+                           : ch.toUpperCase().charCodeAt(0);
                 ci.simulateKeyPress(code);
-                await new Promise(r => setTimeout(r, 30));
+                await new Promise(r => setTimeout(r, 40));
             }
             ci.simulateKeyPress(13); // Enter
         }
