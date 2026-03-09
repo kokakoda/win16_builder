@@ -237,46 +237,52 @@ async function boot() {
         } catch(dosErr) {
             throw new Error('Dos() failed: ' + dosErr.message);
         }
-        ci.setAutoStart(true);
+        // v8 DosInstance exposes an events() emitter.
+        // The "run" event fires when DOSBox is up and the CommandInterface is ready.
+        log('Waiting for DOSBox run event…', 'dim');
 
-        // ci is the v8 DosInstance (settings object).
-        // The actual CommandInterface with fs/shell is delivered via setFrame().
-        // setFrame(fn) calls fn(ci) each render frame — we use it once to get
-        // the real CI, then clear the frame callback.
-        log('Waiting for CommandInterface via setFrame…', 'dim');
-
-        const realCI = await new Promise(function(resolve) {
-            ci.setFrame(function(commandInterface) {
-                ci.setFrame(null);
-                resolve(commandInterface);
-            });
+        const realCI = await new Promise(function(resolve, reject) {
+            // events() returns a subscriber — listen for "run"
+            try {
+                ci.events().onRun(function(commandInterface) {
+                    resolve(commandInterface);
+                });
+            } catch(e) {
+                // Fallback: try event emitter pattern
+                try {
+                    ci.events().on('run', function(commandInterface) {
+                        resolve(commandInterface);
+                    });
+                } catch(e2) {
+                    reject(new Error('No events API: ' + e.message + ' / ' + e2.message));
+                }
+            }
+            // Trigger start
+            ci.setAutoStart(true);
         });
 
-        // Log the real CI shape
-        const rciKeys = Object.keys(realCI).join(', ');
         console.log('realCI:', realCI);
-        log('realCI keys: ' + rciKeys, 'dim');
-
+        log('realCI keys: ' + Object.keys(realCI).join(', '), 'dim');
         dosInstance = realCI;
-        log('Command interface ready', 'ok');
+        log('DOSBox running', 'ok');
 
-        // Try all known FS write methods
-        const fsObj = realCI.fs || realCI.getFs && realCI.getFs();
+        // Write hdd.img into the emulator FS then mount and launch Windows
+        const fsObj   = realCI.fs   || (realCI.getFs   && realCI.getFs());
+        const shellFn = realCI.shell || realCI.sendCommand || realCI.run;
+
         if (fsObj && fsObj.writeFile) {
             setProgress('Writing disk image', 95);
             log('Writing hdd.img…', 'dim');
             try {
                 await fsObj.writeFile("/hdd.img", decompressed);
                 log('hdd.img written', 'ok');
-            } catch(e) { log('writeFile err: ' + e.message, 'warn'); }
+            } catch(e) { log('writeFile: ' + e.message, 'warn'); }
         } else {
-            log('fs.writeFile not found — keys: ' + rciKeys, 'warn');
+            log('No fs.writeFile on realCI', 'warn');
         }
 
-        // Try all known shell/command methods  
-        const shellFn = realCI.shell || realCI.sendCommand || realCI.run;
         if (shellFn) {
-            setProgress('Mounting image', 97);
+            setProgress('Mounting', 97);
             const send = shellFn.bind(realCI);
             await send("z:");
             await send("mount -u c");
@@ -285,7 +291,7 @@ async function boot() {
             await send("cd windows");
             await send("win.com");
         } else {
-            log('No shell method — keys: ' + rciKeys, 'err');
+            log('No shell fn on realCI', 'err');
         }
 
         setProgress('Running', 100);
