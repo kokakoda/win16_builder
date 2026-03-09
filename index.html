@@ -229,53 +229,48 @@ async function boot() {
         // Store the Dos() promise in a variable so it isn't GC'd before
         // the worker responds — Firefox throws "Promised response from
         // onMessage listener went out of scope" if nothing holds the reference.
-        const bundleBuffer = bundleBytes.buffer.slice(0);
+        // v8 Dos() returns a Promise<CommandInterface> — await it directly.
+        // onRun/onError are not valid v8 options; the promise resolves when
+        // the emulator is ready.
+        let ci;
+        try {
+            ci = await Dos(canvas, {
+                bundle: bundleBytes.buffer.slice(0),
+                workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
+                noCacheDb: true,
+                noCloud: true,
+            });
+        } catch(dosErr) {
+            throw new Error('Dos() failed: ' + dosErr.message);
+        }
 
-        const dosPromise = Dos(canvas, {
-            bundle: bundleBuffer,
-            workerUrl: 'https://v8.js-dos.com/latest/js-dos-worker.js',
-            noCacheDb: true,
-            noCloud: true,
-            onRun: async function(ci) {
-                clearTimeout(stallTimer);
-                dosInstance = ci;
-                setProgress('Writing disk image', 95);
-                log('Writing hdd.img to emulator FS…', 'dim');
-                try {
-                    // ci.fs.writeFile path must be absolute in the Emscripten FS
-                    await ci.fs.writeFile("/hdd.img", decompressed);
-                    log('hdd.img written', 'ok');
-                } catch(e) {
-                    log('writeFile failed: ' + e.message, 'err');
-                }
-                // Drive the mount + boot sequence via shell commands
-                setProgress('Mounting image', 97);
-                log('Mounting disk image…', 'dim');
-                await ci.shell("z:");
-                await ci.shell("mount -u c");
-                await ci.shell("imgmount c hdd.img -t hdd -fs fat");
-                await ci.shell("c:");
-                await ci.shell("cd windows");
-                await ci.shell("win.com");
-                setProgress('Running', 100);
-                log('Windows 3.1 launched', 'ok');
-                document.getElementById('boot-overlay').classList.add('hidden');
-                importBtn.disabled = false;
-                exportBtn.disabled = false;
-            },
-            onError: function(err) {
-                clearTimeout(stallTimer);
-                log('Error: ' + (err && err.message ? err.message : String(err)), 'err');
-            }
-        });
+        dosInstance = ci;
+        log('Emulator ready', 'ok');
 
-        // Warn if emulator hasn't started within 60s — helps diagnose stalls
-        const stallTimer = setTimeout(function() {
-            if (!dosInstance) {
-                log('WARNING: emulator still not running after 60s', 'warn');
-                log('Check browser console for worker errors', 'warn');
-            }
-        }, 60000);
+        setProgress('Writing disk image', 95);
+        log('Writing hdd.img to emulator FS…', 'dim');
+        try {
+            await ci.fs.writeFile("/hdd.img", decompressed);
+            log('hdd.img written', 'ok');
+        } catch(e) {
+            log('writeFile failed: ' + e.message, 'err');
+        }
+
+        setProgress('Mounting image', 97);
+        log('Mounting disk image…', 'dim');
+        await ci.shell("z:");
+        await ci.shell("mount -u c");
+        await ci.shell("imgmount c hdd.img -t hdd -fs fat");
+        await ci.shell("c:");
+        await ci.shell("cd windows");
+        await ci.shell("win.com");
+
+        setProgress('Running', 100);
+        log('Windows 3.1 launched', 'ok');
+        document.getElementById('boot-overlay').classList.add('hidden');
+        importBtn.disabled = false;
+        exportBtn.disabled = false;
+
 
     } catch (err) {
         log('FAILED: ' + err.message, 'err');
