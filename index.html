@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Win16 Development Environment</title>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pako@2/dist/pako.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
     <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
     <style>
@@ -153,80 +153,98 @@
             statusEl.scrollTop = statusEl.scrollHeight;
         }
         
-async function downloadAndReassemble() {
-    setStatus('Downloading disk image parts...');
-    
-    try {
-        setStatus('Fetching part 1...');
-        const response1 = await fetch('win31.img.gz.aa');
-        if (!response1.ok) {
-            setStatus('Error: Failed to fetch win31.img.gz.aa (HTTP ' + response1.status + ')');
-            return;
-        }
-        const part1 = await response1.arrayBuffer();
-        setStatus('Part 1 fetched (' + (part1.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
-        
-        setStatus('Fetching part 2...');
-        const response2 = await fetch('win31.img.gz.ab');
-        if (!response2.ok) {
-            setStatus('Error: Failed to fetch win31.img.gz.ab (HTTP ' + response2.status + ')');
-            return;
-        }
-        const part2 = await response2.arrayBuffer();
-        setStatus('Part 2 fetched (' + (part2.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
-        
-        setStatus('Reassembling compressed image...');
-        const combined = new Uint8Array(part1.byteLength + part2.byteLength);
-        combined.set(new Uint8Array(part1), 0);
-        combined.set(new Uint8Array(part2), part1.byteLength);
-        setStatus('Image reassembled (' + (combined.length / 1024 / 1024).toFixed(2) + ' MB)');
-        
-        setStatus('Decompressing (this may take a minute)...');
-        let decompressed;
-        try {
-            decompressed = pako.inflate(combined);
-        } catch (decompErr) {
-            setStatus('Decompression failed: ' + decompErr.message);
-            console.error('Pako error:', decompErr);
-            return;
-        }
-        setStatus('Decompression complete (' + (decompressed.length / 1024 / 1024).toFixed(2) + ' MB)');
-        
-        // Create blob and URL
-        const blob = new Blob([decompressed], { type: 'application/octet-stream' });
-        const imageUrl = URL.createObjectURL(blob);
-        
-        setStatus('Image blob created, size: ' + (blob.size / 1024 / 1024).toFixed(2) + ' MB\nInitializing emulator...');
-        
-        // Small delay to let the browser breathe
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        setStatus('Booting Windows 3.1...');
-        
-        // Wrap Dos() call with explicit error handling
-        try {
-            Dos(document.getElementById('dos'), {
-                url: imageUrl,
-                onRun: (ci) => {
-                    dosInstance = ci;
-                    setStatus('✓ Windows 3.1 booted. Ready for work.');
-                    exportBtn.disabled = false;
-                },
-                onError: (error) => {
-                    setStatus('DOS runtime error: ' + (error.message || JSON.stringify(error)));
-                    console.error('DOS error object:', error);
+        async function downloadAndReassemble() {
+            setStatus('Downloading disk image parts...');
+            
+            try {
+                setStatus('Fetching part 1...');
+                const response1 = await fetch('win31.img.gz.aa');
+                if (!response1.ok) {
+                    setStatus('Error: Failed to fetch win31.img.gz.aa (HTTP ' + response1.status + ')');
+                    return;
                 }
-            });
-        } catch (dosErr) {
-            setStatus('Dos() initialization threw: ' + dosErr.message + '\n' + dosErr.stack);
-            console.error('Dos() error:', dosErr);
+                const part1 = await response1.arrayBuffer();
+                setStatus('Part 1 fetched (' + (part1.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
+                
+                setStatus('Fetching part 2...');
+                const response2 = await fetch('win31.img.gz.ab');
+                if (!response2.ok) {
+                    setStatus('Error: Failed to fetch win31.img.gz.ab (HTTP ' + response2.status + ')');
+                    return;
+                }
+                const part2 = await response2.arrayBuffer();
+                setStatus('Part 2 fetched (' + (part2.byteLength / 1024 / 1024).toFixed(2) + ' MB)');
+                
+                setStatus('Reassembling compressed image...');
+                const combined = new Uint8Array(part1.byteLength + part2.byteLength);
+                combined.set(new Uint8Array(part1), 0);
+                combined.set(new Uint8Array(part2), part1.byteLength);
+                setStatus('Image reassembled (' + (combined.length / 1024 / 1024).toFixed(2) + ' MB)');
+                
+                setStatus('Decompressing (this may take a minute)...');
+                console.log('pako object:', typeof pako);
+                console.log('pako.inflate:', typeof pako.inflate);
+                console.log('combined buffer type:', combined.constructor.name);
+                console.log('combined size:', combined.length);
+                
+                if (typeof pako === 'undefined' || typeof pako.inflate !== 'function') {
+                    setStatus('ERROR: pako library not loaded or inflate not available');
+                    return;
+                }
+                
+                let decompressed;
+                try {
+                    console.log('Calling pako.inflate...');
+                    decompressed = pako.inflate(combined);
+                    console.log('Decompression succeeded, result size:', decompressed.length);
+                } catch (pakoErr) {
+                    setStatus('Pako error: ' + pakoErr.message);
+                    console.error('Pako threw:', pakoErr);
+                    return;
+                }
+                
+                setStatus('Decompression complete (' + (decompressed.length / 1024 / 1024).toFixed(2) + ' MB)');
+                
+                const blob = new Blob([decompressed], { type: 'application/octet-stream' });
+                const imageUrl = URL.createObjectURL(blob);
+                
+                setStatus('Image blob created, size: ' + (blob.size / 1024 / 1024).toFixed(2) + ' MB\nInitializing emulator...');
+                
+                // Small delay to let the browser breathe
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                setStatus('Booting Windows 3.1...');
+                
+                // Wrap Dos() call with explicit error handling
+                try {
+                    console.log('Dos object:', typeof Dos);
+                    if (typeof Dos === 'undefined') {
+                        setStatus('ERROR: Dos object not found. js-dos library failed to load.');
+                        return;
+                    }
+                    
+                    Dos(document.getElementById('dos'), {
+                        url: imageUrl,
+                        onRun: (ci) => {
+                            dosInstance = ci;
+                            setStatus('✓ Windows 3.1 booted. Ready for work.');
+                            exportBtn.disabled = false;
+                        },
+                        onError: (error) => {
+                            setStatus('DOS runtime error: ' + (error.message || JSON.stringify(error)));
+                            console.error('DOS error object:', error);
+                        }
+                    });
+                } catch (dosErr) {
+                    setStatus('Dos() initialization threw: ' + dosErr.message + '\n' + dosErr.stack);
+                    console.error('Dos() error:', dosErr);
+                }
+                
+            } catch (err) {
+                setStatus('Error: ' + (err.message || 'Unknown error') + '\nStack: ' + (err.stack || 'N/A'));
+                console.error('Outer error:', err);
+            }
         }
-        
-    } catch (err) {
-        setStatus('Error: ' + (err.message || 'Unknown error') + '\nStack: ' + (err.stack || 'N/A'));
-        console.error('Outer error:', err);
-    }
-}
         
         async function importFiles() {
             const fileInput = document.getElementById('uploadZip');
