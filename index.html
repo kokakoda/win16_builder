@@ -244,45 +244,43 @@ async function boot() {
             throw new Error('Dos() failed: ' + dosErr.message);
         }
 
-        dosInstance = ci;
-        // Log the actual shape of ci so we know the real API
-        const ciKeys = Object.keys(ci).join(', ');
-        const ciProtoKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(ci)).join(', ');
-        log('ci keys: ' + ciKeys, 'dim');
-        log('ci proto: ' + ciProtoKeys, 'dim');
-        console.log('ci object:', ci);
-        log('Emulator ready', 'ok');
+        // ci is the v8 DosInstance (settings object).
+        // The actual CommandInterface with fs/shell is delivered via setFrame().
+        // setFrame(fn) calls fn(ci) each render frame — we use it once to get
+        // the real CI, then clear the frame callback.
+        log('Waiting for CommandInterface via setFrame…', 'dim');
 
-        // Try every known variant of the fs/shell API across js-dos versions
-        const fs  = ci.fs  || ci.getFs  && ci.getFs()  || null;
-        const run = ci.shell || ci.run || ci.sendCommand || null;
+        const realCI = await new Promise(function(resolve) {
+            ci.setFrame(function(commandInterface) {
+                // Clear the callback immediately — we only need it once
+                ci.setFrame(null);
+                resolve(commandInterface);
+            });
+        });
+
+        console.log('realCI:', realCI);
+        log('CI keys: ' + Object.keys(realCI).join(', '), 'dim');
+
+        dosInstance = realCI;
+        log('Command interface ready', 'ok');
 
         setProgress('Writing disk image', 95);
         log('Writing hdd.img to emulator FS…', 'dim');
-        if (fs && fs.writeFile) {
-            try {
-                await fs.writeFile("/hdd.img", decompressed);
-                log('hdd.img written', 'ok');
-            } catch(e) {
-                log('writeFile failed: ' + e.message, 'err');
-            }
-        } else {
-            log('No fs.writeFile — will try shell mount directly', 'warn');
+        try {
+            await realCI.fs.writeFile("/hdd.img", decompressed);
+            log('hdd.img written', 'ok');
+        } catch(e) {
+            log('writeFile failed: ' + e.message, 'err');
         }
 
         setProgress('Mounting image', 97);
-        log('Mounting disk image…', 'dim');
-        if (run) {
-            await run("z:");
-            await run("mount -u c");
-            await run("imgmount c hdd.img -t hdd -fs fat");
-            await run("c:");
-            await run("cd windows");
-            await run("win.com");
-        } else {
-            log('No shell/run method found on ci', 'err');
-            log('Available: ' + ciKeys, 'err');
-        }
+        log('Mounting…', 'dim');
+        await realCI.shell("z:");
+        await realCI.shell("mount -u c");
+        await realCI.shell("imgmount c hdd.img -t hdd -fs fat");
+        await realCI.shell("c:");
+        await realCI.shell("cd windows");
+        await realCI.shell("win.com");
 
         setProgress('Running', 100);
         log('Windows 3.1 launched', 'ok');
