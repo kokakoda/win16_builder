@@ -459,8 +459,12 @@
                     // without disturbing the C: letter assignment.
                     // boot 2 then issues a BIOS INT 19h boot from that drive,
                     // handing control to the MBR on the image.
-                    "imgmount 2 hdd.img -t hdd",
-                    "boot 2"
+                    "z:",
+                    "mount -u c",
+                    "imgmount c hdd.img -t hdd -fs fat",
+                    "c:",
+                    "cd windows",
+                    "win"
                 ].join("\n"),
                 hardware: {
                     cpu: "386",
