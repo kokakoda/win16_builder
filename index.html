@@ -144,93 +144,31 @@ async function fetchPart(url, label, pStart, pEnd) {
 async function boot() {
     log('Starting…', 'dim');
     try {
-        const part1 = await fetchPart('win31.img.gz.aa', 'Part 1', 2, 30);
-        const part2 = await fetchPart('win31.img.gz.ab', 'Part 2', 30, 55);
+        // Fetch the pre-built .jsdos bundle (contains hdd.img + dosbox.conf)
+        // The bundle is gzip-compressed and split into two parts for GitHub Pages.
+        const part1 = await fetchPart('win31.jsdos.gz.aa', 'Part 1', 2, 45);
+        const part2 = await fetchPart('win31.jsdos.gz.ab', 'Part 2', 45, 80);
 
-        setProgress('Reassembling', 56);
+        setProgress('Reassembling', 81);
         const combined = new Uint8Array(part1.length + part2.length);
         combined.set(part1, 0);
         combined.set(part2, part1.length);
-        if (combined[0] !== 0x1f || combined[1] !== 0x8b)
-            throw new Error('Bad gzip header');
 
-        setProgress('Decompressing', 58);
-        log('Decompressing…', 'dim');
+        setProgress('Decompressing bundle', 85);
+        log('Decompressing bundle…', 'dim');
         await new Promise(r => setTimeout(r, 30));
-        const decompressed = pako.inflate(combined);
-        log('Decompressed: ' + (decompressed.length/1024/1024).toFixed(0) + ' MB', 'ok');
+        const bundleBytes = pako.inflate(combined);
+        log('Bundle: ' + (bundleBytes.length/1024/1024).toFixed(0) + ' MB', 'ok');
 
-        setProgress('Building bundle', 60);
-        log('Building bundle…', 'dim');
-        await new Promise(r => setTimeout(r, 30));
-
-        // js-dos v8 bundle format:
-        //   jsdos.json        — metadata, must have "version":"8"
-        //   dosbox.conf       — DOSBox config read by the emulator
-        //   hdd.img           — disk image, available in FS root during autoexec
-        //
-        // The v8 worker iframe issue happens when Dos() is called with a div
-        // AND no workerUrl — it uses window.location as the worker, which
-        // re-loads our page. Fix: pass a dedicated workerUrl from the CDN.
-
-        // Keep the bundle tiny — just config, no disk image.
-        // Transferring 504 MB to a worker via postMessage stalls indefinitely.
-        // Instead we write hdd.img into the FS via ci.fs after onRun fires,
-        // then drive the mount+boot sequence via ci.shell() commands.
-        const goScript = [
-            "@echo off",
-            "imgmount c hdd.img -t hdd -fs fat",
-            "c:",
-            "cd windows",
-            "win.com"
-        ].join("\r\n");
-
-        const dosboxConf = [
-            "[dosbox]",
-            "machine=svga_s3",
-            "memsize=16",
-            "",
-            "[cpu]",
-            "cputype=386",
-            "cycles=25000",
-            "",
-            "[dos]",
-            "xms=true",
-            "ems=true",
-            "umb=true",
-            "",
-            "[sblaster]",
-            "sbtype=sb16",
-            "sbbase=220",
-            "irq=7",
-            "dma=1",
-            "hdma=5",
-            "oplmode=auto",
-            "",
-            "[autoexec]",
-            "@echo off",
-            "echo Ready."
-        ].join("\r\n");
-
-        const zip = new JSZip();
-        zip.file(".jsdos/jsdos.json",  JSON.stringify({ version: "8", emulatorVersion: "8" }));
-        zip.file(".jsdos/dosbox.conf", dosboxConf);
-        zip.file("go.bat", goScript);
-
-        const bundleBytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-        const bundleBlob  = new Blob([bundleBytes], { type: "application/zip" });
+        const bundleBlob = new Blob([bundleBytes], { type: "application/zip" });
         const bundleUrl  = URL.createObjectURL(bundleBlob);
-        log('Bundle: ' + (bundleBlob.size/1024).toFixed(1) + ' KB → ' + bundleUrl, 'ok');
 
         setProgress('Starting emulator', 93);
         await new Promise(r => setTimeout(r, 100));
-
         if (typeof Dos === 'undefined') throw new Error('js-dos failed to load');
 
-        // v8 Dos() takes the container element (div), not a canvas.
-        // It creates its own canvas internally and renders into the div.
         const dosContainer = document.getElementById('dos-container');
-        log('Starting DOSBox with onEvent handler…', 'dim');
+        log('Starting DOSBox…', 'dim');
 
         const realCI = await new Promise(function(resolve, reject) {
             try {
@@ -242,42 +180,15 @@ async function boot() {
                     autoStart: true,
                     onEvent: function(event, arg) {
                         log('DosEvent: ' + event, 'dim');
-                        if (event === 'ci-ready') {
-                            resolve(arg);
-                        }
+                        if (event === 'ci-ready') { resolve(arg); }
                     }
                 });
-            } catch(e) {
-                reject(e);
-            }
+            } catch(e) { reject(e); }
         });
 
         dosInstance = realCI;
-        log('DOSBox running', 'ok');
-
-        // Write hdd.img then send mount commands by typing them
-        setProgress('Writing hdd.img', 95);
-        log('Writing hdd.img (' + (decompressed.length/1024/1024).toFixed(0) + ' MB)…', 'dim');
-        await realCI.fsWriteFile("hdd.img", decompressed);
-        log('hdd.img written — sending commands…', 'ok');
-
-        // go.bat is already in the bundle on Z:\ — just type its name + Enter
-        setProgress('Launching', 97);
-        // sendKeyEvent(keyCode, pressed) is the explicit keydown/keyup API
-        async function pressKey(ci, code) {
-            ci.sendKeyEvent(code, true);
-            await new Promise(r => setTimeout(r, 80));
-            ci.sendKeyEvent(code, false);
-            await new Promise(r => setTimeout(r, 80));
-        }
-
-        await new Promise(r => setTimeout(r, 1000));
-        await pressKey(realCI, 71); // G
-        await pressKey(realCI, 79); // O
-        await pressKey(realCI, 13); // Enter
-
+        log('Windows 3.1 booting…', 'ok');
         setProgress('Running', 100);
-        log('Boot sequence sent', 'ok');
         const ov = document.getElementById('boot-overlay');
         if (ov) ov.classList.add('hidden');
         importBtn.disabled = false;
