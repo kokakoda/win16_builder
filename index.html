@@ -245,25 +245,44 @@ async function boot() {
         }
 
         dosInstance = ci;
+        // Log the actual shape of ci so we know the real API
+        const ciKeys = Object.keys(ci).join(', ');
+        const ciProtoKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(ci)).join(', ');
+        log('ci keys: ' + ciKeys, 'dim');
+        log('ci proto: ' + ciProtoKeys, 'dim');
+        console.log('ci object:', ci);
         log('Emulator ready', 'ok');
+
+        // Try every known variant of the fs/shell API across js-dos versions
+        const fs  = ci.fs  || ci.getFs  && ci.getFs()  || null;
+        const run = ci.shell || ci.run || ci.sendCommand || null;
 
         setProgress('Writing disk image', 95);
         log('Writing hdd.img to emulator FS…', 'dim');
-        try {
-            await ci.fs.writeFile("/hdd.img", decompressed);
-            log('hdd.img written', 'ok');
-        } catch(e) {
-            log('writeFile failed: ' + e.message, 'err');
+        if (fs && fs.writeFile) {
+            try {
+                await fs.writeFile("/hdd.img", decompressed);
+                log('hdd.img written', 'ok');
+            } catch(e) {
+                log('writeFile failed: ' + e.message, 'err');
+            }
+        } else {
+            log('No fs.writeFile — will try shell mount directly', 'warn');
         }
 
         setProgress('Mounting image', 97);
         log('Mounting disk image…', 'dim');
-        await ci.shell("z:");
-        await ci.shell("mount -u c");
-        await ci.shell("imgmount c hdd.img -t hdd -fs fat");
-        await ci.shell("c:");
-        await ci.shell("cd windows");
-        await ci.shell("win.com");
+        if (run) {
+            await run("z:");
+            await run("mount -u c");
+            await run("imgmount c hdd.img -t hdd -fs fat");
+            await run("c:");
+            await run("cd windows");
+            await run("win.com");
+        } else {
+            log('No shell/run method found on ci', 'err');
+            log('Available: ' + ciKeys, 'err');
+        }
 
         setProgress('Running', 100);
         log('Windows 3.1 launched', 'ok');
