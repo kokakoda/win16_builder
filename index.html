@@ -203,10 +203,7 @@ async function boot() {
             "[autoexec]",
             "@echo off",
             "echo Mounting disk image...",
-            "imgmount c hdd.img -t hdd -fs fat",
-            "c:",
-            "cd windows",
-            "win.com"
+            "echo Ready."
         ].join("\r\n");
 
         // v8 bundle format: config files must be in the .jsdos/ subdirectory
@@ -237,8 +234,6 @@ async function boot() {
                     noCacheDb: true,
                     noCloud: true,
                     autoStart: true,
-                    // initFs injects files into the FS before autoexec runs
-                    initFs: [{ path: "hdd.img", contents: decompressed }],
                     onEvent: function(event, arg) {
                         log('DosEvent: ' + event, 'dim');
                         if (event === 'ci-ready') {
@@ -252,12 +247,39 @@ async function boot() {
         });
 
         dosInstance = realCI;
-        log('DOSBox running — Windows should be booting', 'ok');
-        // hdd.img was injected via initFs before autoexec ran.
-        // The autoexec handles: imgmount c hdd.img → c: → cd windows → win.com
+        log('DOSBox running', 'ok');
+
+        // Write hdd.img then send mount commands by typing them
+        setProgress('Writing hdd.img', 95);
+        log('Writing hdd.img (' + (decompressed.length/1024/1024).toFixed(0) + ' MB)…', 'dim');
+        await realCI.fsWriteFile("hdd.img", decompressed);
+        log('hdd.img written — sending commands…', 'ok');
+
+        // Type a command string into DOSBox followed by Enter
+        async function typeCommand(ci, cmd) {
+            // Small delay so DOSBox is ready for input
+            await new Promise(r => setTimeout(r, 300));
+            for (const ch of cmd) {
+                const code = ch.toUpperCase().charCodeAt(0);
+                ci.simulateKeyPress(code);
+                await new Promise(r => setTimeout(r, 20));
+            }
+            ci.simulateKeyPress(13); // Enter
+        }
+
+        setProgress('Mounting', 97);
+        await typeCommand(realCI, 'imgmount c hdd.img -t hdd -fs fat');
+        await new Promise(r => setTimeout(r, 1500)); // wait for imgmount
+        await typeCommand(realCI, 'c:');
+        await new Promise(r => setTimeout(r, 500));
+        await typeCommand(realCI, 'cd windows');
+        await new Promise(r => setTimeout(r, 500));
+        await typeCommand(realCI, 'win.com');
 
         setProgress('Running', 100);
-        document.getElementById('boot-overlay').classList.add('hidden');
+        log('Boot sequence sent', 'ok');
+        const ov = document.getElementById('boot-overlay');
+        if (ov) ov.classList.add('hidden');
         importBtn.disabled = false;
         exportBtn.disabled = false;
 
@@ -266,7 +288,7 @@ async function boot() {
     } catch (err) {
         log('FAILED: ' + err.message, 'err');
         console.error(err);
-        document.getElementById('boot-log').textContent = 'Failed: ' + err.message;
+        const bl = document.getElementById('boot-log'); if (bl) bl.textContent = 'Failed: ' + err.message;
     }
 }
 
