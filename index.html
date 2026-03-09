@@ -263,14 +263,18 @@ async function boot() {
 
         // go.bat is already in the bundle on Z:\ — just type its name + Enter
         setProgress('Launching', 97);
+        // sendKeyEvent(keyCode, pressed) is the explicit keydown/keyup API
+        async function pressKey(ci, code) {
+            ci.sendKeyEvent(code, true);
+            await new Promise(r => setTimeout(r, 80));
+            ci.sendKeyEvent(code, false);
+            await new Promise(r => setTimeout(r, 80));
+        }
+
         await new Promise(r => setTimeout(r, 1000));
-        realCI.simulateKeyPress(71); // G
-        await new Promise(r => setTimeout(r, 150));
-        realCI.simulateKeyPress(79); // O
-        await new Promise(r => setTimeout(r, 300));
-        realCI.simulateKeyPress(13); // Enter (keyCode 13 = Return)
-        await new Promise(r => setTimeout(r, 100));
-        realCI.simulateKeyPress(10); // also try LF just in case
+        await pressKey(realCI, 71); // G
+        await pressKey(realCI, 79); // O
+        await pressKey(realCI, 13); // Enter
 
         setProgress('Running', 100);
         log('Boot sequence sent', 'ok');
