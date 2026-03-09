@@ -453,7 +453,14 @@
                     "oplemu=default",
                     "",
                     "[autoexec]",
-                    "boot -l c"
+                    // js-dos extracts the bundle zip into its virtual FS root,
+                    // which DOSBox sees as C:. hdd.img therefore lands at C:\\hdd.img.
+                    // imgmount 2 registers it as BIOS drive 0x80 (first hard disk)
+                    // without disturbing the C: letter assignment.
+                    // boot 2 then issues a BIOS INT 19h boot from that drive,
+                    // handing control to the MBR on the image.
+                    "imgmount 2 hdd.img -t hdd",
+                    "boot 2"
                 ].join("\n"),
                 hardware: {
                     cpu: "386",
@@ -463,33 +470,28 @@
                 }
             };
 
-            // ── Bundle contains ONLY jsdos.json — no disk image ──────────────
-            // js-dos maps the bundle zip's contents onto the DOSBox virtual FS
-            // root, which it also exposes as C:. Embedding hdd.img inside the
-            // bundle therefore makes it a file *on* C: rather than a mountable
-            // disk, and imgmount / boot -l c both fail silently.
-            //
-            // The correct approach for js-dos v8 is to pass the disk image
-            // separately via the `hdd` option. js-dos wires it to BIOS drive
-            // 0x80 before DOSBox initialises drive letters, so [autoexec] only
-            // needs `boot -l c` to boot from it.
+            // ── Bundle: jsdos.json + hdd.img ─────────────────────────────────
+            // js-dos extracts the bundle into its virtual FS root (= DOSBox C:).
+            // hdd.img lands there as a plain file, reachable by imgmount above.
+            // We use STORE (no compression) so the 503 MB image isn't re-zipped
+            // in the browser — it's already been through gzip decompression.
+            setProgress('Building bundle', 78);
+            log('Building bundle…', 'dim');
+            await new Promise(r => setTimeout(r, 50));
+
             const bundleZip = new JSZip();
             bundleZip.file("jsdos.json", JSON.stringify(jsdosConfig, null, 2));
+            bundleZip.file("hdd.img", decompressed, { binary: true });
 
             const bundleBytes = await bundleZip.generateAsync({
                 type: "uint8array",
-                compression: "DEFLATE",
-                compressionOptions: { level: 1 }
+                compression: "STORE"    // no re-compression on a 503 MB payload
             });
 
-            setProgress('Preparing emulator', 88);
+            setProgress('Preparing emulator', 90);
             const bundleBlob = new Blob([bundleBytes], { type: "application/zip" });
             const bundleUrl  = URL.createObjectURL(bundleBlob);
-
-            // Disk image as a separate blob URL
-            const hddBlob = new Blob([decompressed], { type: "application/octet-stream" });
-            const hddUrl  = URL.createObjectURL(hddBlob);
-            log(`Bundle: ${(bundleBlob.size / 1024).toFixed(0)} KB  |  HDD: ${(hddBlob.size / 1024 / 1024).toFixed(0)} MB`, 'ok');
+            log(`Bundle ready: ${(bundleBlob.size / 1024 / 1024).toFixed(0)} MB`, 'ok');
 
             setProgress('Booting DOS', 94);
             log('Handing off to js-dos…', 'dim');
@@ -500,7 +502,6 @@
 
             Dos(document.getElementById('dos'), {
                 url: bundleUrl,
-                hdd: hddUrl,        // <-- disk image wired to BIOS 0x80
                 onRun: (ci) => {
                     dosInstance = ci;
                     setProgress('Running', 100);
