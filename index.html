@@ -227,39 +227,70 @@ async function stageZip(file) {
 
 async function importFiles() {
     if (!dosInstance) return;
+    importBtn.disabled = true;
     var ok = 0, fail = 0;
-    for (const [path, data] of Object.entries(stagedFiles)) {
-        // fsWriteFile paths are relative to DOSBox root (no drive letter)
-        const dosPath = 'c/src/' + path.replace(/\\/g, '/').replace(/^\//, '');
-        try { await dosInstance.fsWriteFile(dosPath, data); ok++; }
-        catch(e) { log('x ' + path + ': ' + e.message, 'err'); fail++; }
+
+    // Ensure c/src exists - fsWriteFile won't create missing directories
+    try { await dosInstance.fsWriteFile('c/src/.keep', new Uint8Array(0)); } catch(e) {}
+
+    // Create any subdirectory stubs first
+    const dirs = new Set();
+    for (const path of Object.keys(stagedFiles)) {
+        const parts = path.replace(/\\/g, '/').replace(/^\//, '').split('/');
+        for (let i = 1; i < parts.length; i++)
+            dirs.add('c/src/' + parts.slice(0, i).join('/'));
     }
-    log('Import: ' + ok + ' ok, ' + fail + ' failed', ok ? 'ok' : 'err');
+    for (const dir of [...dirs].sort())
+        try { await dosInstance.fsWriteFile(dir + '/.keep', new Uint8Array(0)); } catch(e) {}
+
+    for (const [path, data] of Object.entries(stagedFiles)) {
+        const clean = path.replace(/\\/g, '/').replace(/^\//, '');
+        const dosPath = 'c/src/' + clean;
+        log('Writing ' + clean + ' (' + data.length + 'b)...', 'dim');
+        try {
+            await dosInstance.fsWriteFile(dosPath, data);
+            log('  OK: ' + clean, 'ok');
+            ok++;
+        } catch(e) {
+            log('  FAIL: ' + clean + ' — ' + e.message, 'err');
+            fail++;
+        }
+    }
+    log('Import: ' + ok + ' ok, ' + fail + ' failed', ok && !fail ? 'ok' : 'err');
+    importBtn.disabled = false;
 }
 
 async function exportFiles() {
     if (!dosInstance) return;
     exportBtn.disabled = true;
     try {
-        // fsTree() returns the full FS structure; find c/export files
         const tree = await dosInstance.fsTree();
-        // Navigate to c/export
+        log('FS tree: ' + JSON.stringify(tree.nodes ? tree.nodes.map(n=>n.name) : tree), 'dim');
+
+        // Find c drive (case-insensitive)
         const cDrive = tree.nodes && tree.nodes.find(n => n.name.toLowerCase() === 'c');
-        const exportDir = cDrive && cDrive.nodes && cDrive.nodes.find(n => n.name.toUpperCase() === 'EXPORT');
+        if (!cDrive) { log('C: drive not found in FS tree', 'err'); exportBtn.disabled = false; return; }
+        log('C: nodes: ' + (cDrive.nodes ? cDrive.nodes.map(n=>n.name).join(', ') : 'none'), 'dim');
+
+        const exportDir = cDrive.nodes && cDrive.nodes.find(n => n.name.toUpperCase() === 'EXPORT');
         if (!exportDir || !exportDir.nodes || !exportDir.nodes.length) {
-            log('C:\EXPORT\ empty or not found', 'warn'); exportBtn.disabled = false; return;
+            log('C:\EXPORT\ empty or not found. Create it in DOS and copy files there.', 'warn');
+            exportBtn.disabled = false; return;
         }
+        const files = exportDir.nodes.filter(n => n.size !== null);
+        log('Exporting ' + files.length + ' file(s) from C:\EXPORT\...', 'dim');
         const zip = new JSZip();
-        for (const e of exportDir.nodes) {
-            if (e.size === null) continue; // directory
-            const data = await dosInstance.fsReadFile('c/export/' + e.name);
+        for (const e of files) {
+            const p = 'c/export/' + e.name;
+            log('  Reading ' + p, 'dim');
+            const data = await dosInstance.fsReadFile(p);
             zip.file(e.name, data);
         }
         const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob); a.download = 'win16_export.zip'; a.click();
         URL.revokeObjectURL(a.href);
-        log('Exported ' + exportDir.nodes.length + ' file(s)', 'ok');
+        log('Exported ' + files.length + ' file(s)', 'ok');
     } catch(e) { log('Export error: ' + e.message, 'err'); }
     exportBtn.disabled = false;
 }
