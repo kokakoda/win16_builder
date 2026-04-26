@@ -76,11 +76,8 @@
         <div class="panel">
             <div class="panel-title">Import</div>
             <p>Upload a ZIP of source files (.c, .h, .mak…). They will be written into C:\SRC\ on the DOS filesystem.</p>
-            <div class="drop-zone" id="dropZone">
-                <input type="file" id="uploadZip" accept=".zip" onchange="handleFileSelect(event)">
-                <span class="drop-zone-icon">📦</span>
-                <span class="drop-zone-label">Drop ZIP or click to browse</span>
-            </div>
+            <button class="btn" onclick="document.getElementById('uploadZip').click()"><span class="btn-dot"></span>Drop ZIP or click to browse</button>
+            <input type="file" id="uploadZip" accept=".zip" style="display:none">
             <div class="file-list" id="fileList"><div class="file-list-empty">No files staged</div></div>
         </div>
         <div class="panel">
@@ -189,6 +186,19 @@ async function boot() {
         });
 
         dosInstance = realCI;
+
+        // Probe what paths fsWriteFile actually accepts
+        const testPaths = ['c/src/test.txt', 'C/SRC/test.txt', '/c/src/test.txt', 'src/test.txt'];
+        const testData = new TextEncoder().encode('test');
+        for (const tp of testPaths) {
+            try {
+                await dosInstance.fsWriteFile(tp, testData);
+                log('fsWriteFile OK: ' + tp, 'ok');
+                break;
+            } catch(e) {
+                log('fsWriteFile FAIL: ' + tp + ' — ' + e.message, 'dim');
+            }
+        }
         log('Windows 3.1 booting…', 'ok');
         setProgress('Running', 100);
         const ov = document.getElementById('boot-overlay');
@@ -205,11 +215,12 @@ async function boot() {
     }
 }
 
-function handleFileSelect(evt) { const f = evt.target.files[0]; if (f) stageZip(f); }
-const dz = document.getElementById('dropZone');
-dz.addEventListener('dragover',  function(e) { e.preventDefault(); dz.classList.add('drag-over'); });
-dz.addEventListener('dragleave', function()  { dz.classList.remove('drag-over'); });
-dz.addEventListener('drop', function(e) { e.preventDefault(); dz.classList.remove('drag-over'); var f = e.dataTransfer.files[0]; if (f) stageZip(f); });
+// File input - plain change handler, no drop zone complications
+const uploadInput = document.getElementById('uploadZip');
+uploadInput.addEventListener('change', function() {
+    const f = this.files[0];
+    if (f) { stageZip(f); this.value = ''; }
+});
 
 async function stageZip(file) {
     stagedFiles = {};
@@ -220,13 +231,13 @@ async function stageZip(file) {
         await Promise.all(ps);
         const keys = Object.keys(stagedFiles);
         fileList.innerHTML = keys.length ? keys.map(function(p) { return '<div title="'+p+'">· '+p+'</div>'; }).join('') : '<div class="file-list-empty">Empty ZIP</div>';
-        importBtn.disabled = !dosInstance;
+        importBtn.disabled = (keys.length === 0);  // enable once files staged
         log('Staged ' + keys.length + ' file(s)', 'ok');
     } catch(e) { log('ZIP error: ' + e.message, 'err'); }
 }
 
 async function importFiles() {
-    if (!dosInstance) return;
+    if (!dosInstance) { log('DOS not ready yet - wait for boot to complete', 'err'); return; }
     importBtn.disabled = true;
     var ok = 0, fail = 0;
 
