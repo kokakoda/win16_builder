@@ -32,11 +32,6 @@
         .panel { border-bottom:1px solid var(--border); padding:14px; }
         .panel-title { font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
         .panel p { font-size:11px; line-height:1.6; color:var(--muted); margin-bottom:10px; }
-        .drop-zone { border:1px dashed var(--border); border-radius:3px; padding:14px 10px; text-align:center; cursor:pointer; transition:border-color 0.2s,background 0.2s; margin-bottom:8px; position:relative; }
-        .drop-zone:hover,.drop-zone.drag-over { border-color:var(--accent); background:rgba(0,212,160,0.04); }
-        .drop-zone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
-        .drop-zone-icon { font-size:18px; margin-bottom:4px; display:block; }
-        .drop-zone-label { font-family:var(--mono); font-size:10px; color:var(--muted); }
         .btn { width:100%; padding:7px 10px; border:1px solid var(--border); border-radius:2px; background:transparent; color:var(--text); font-family:var(--mono); font-size:11px; cursor:pointer; transition:background 0.15s,border-color 0.15s,color 0.15s; text-align:left; display:flex; align-items:center; gap:8px; margin-bottom:6px; }
         .btn:last-child { margin-bottom:0; }
         .btn:hover:not(:disabled) { background:rgba(255,255,255,0.04); border-color:var(--accent); color:var(--accent); }
@@ -48,7 +43,7 @@
         .status-terminal .err  { color:#ff5555; }
         .status-terminal .warn { color:var(--warn); }
         .status-terminal .dim  { color:var(--muted); }
-        .file-list { font-family:var(--mono); font-size:10px; color:var(--muted); max-height:80px; overflow-y:auto; padding:4px 0; }
+        .file-list { font-family:var(--mono); font-size:10px; color:var(--muted); max-height:80px; overflow-y:auto; padding:4px 0; margin-top:8px; }
         .file-list div { padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.03); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .file-list-empty { font-style:italic; color:#2a2a3a; }
         ::-webkit-scrollbar { width:4px; }
@@ -57,6 +52,8 @@
     </style>
 </head>
 <body>
+
+<!-- Boot overlay: outside dos-container so js-dos doesn't destroy it -->
 <div id="boot-overlay">
     <div class="boot-title">Initialising Environment</div>
     <div class="boot-progress-wrap">
@@ -65,19 +62,24 @@
     </div>
     <div class="boot-log" id="boot-log">—</div>
 </div>
+
 <div class="topbar">
     <div class="topbar-logo">WIN16<span>/DEV</span></div>
     <div class="topbar-sep"></div>
     <div class="topbar-badge">BC++ 4.0 · Win 3.1</div>
 </div>
+
 <div class="workspace">
     <div id="dos-container"></div>
     <div class="sidebar">
         <div class="panel">
             <div class="panel-title">Import</div>
-            <p>Upload a ZIP of source files (.c, .h, .mak…). They will be written into C:\SRC\ on the DOS filesystem.</p>
-            <button class="btn" onclick="document.getElementById('uploadZip').click()"><span class="btn-dot"></span>Drop ZIP or click to browse</button>
-            <input type="file" id="uploadZip" accept=".zip" style="display:none">
+            <p>ZIP of source files (.c, .h, .mak…) → C:\SRC\</p>
+            <!-- Plain button triggers hidden input; no overlay on the canvas -->
+            <button class="btn" id="pickBtn" onclick="document.getElementById('zipInput').click()">
+                <span class="btn-dot"></span>Choose ZIP file…
+            </button>
+            <input type="file" id="zipInput" accept=".zip" style="position:fixed;left:-9999px;opacity:0;">
             <div class="file-list" id="fileList"><div class="file-list-empty">No files staged</div></div>
         </div>
         <div class="panel">
@@ -91,15 +93,18 @@
         </div>
     </div>
 </div>
+
 <script>
 'use strict';
 
-let dosInstance = null;
-let stagedFiles = {};
+let dosInstance  = null;
+let stagedFiles  = {};
+
 const statusEl  = document.getElementById('status');
 const importBtn = document.getElementById('importBtn');
 const exportBtn = document.getElementById('exportBtn');
 const fileList  = document.getElementById('fileList');
+const zipInput  = document.getElementById('zipInput');
 
 function log(msg, cls) {
     const d = document.createElement('div');
@@ -114,16 +119,17 @@ function setProgress(stage, pct) {
     document.getElementById('prog-stage').textContent = stage;
     document.getElementById('prog-pct').textContent   = pct + '%';
     document.getElementById('prog-fill').style.width  = pct + '%';
-    const _bl = document.getElementById('boot-log'); if (_bl) _bl.textContent = stage;
+    const bl = document.getElementById('boot-log');
+    if (bl) bl.textContent = stage;
 }
 
 async function fetchPart(url, label, pStart, pEnd) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ' fetching ' + url);
-    const total = parseInt(resp.headers.get('Content-Length') || '0');
+    const total  = parseInt(resp.headers.get('Content-Length') || '0');
     const reader = resp.body.getReader();
     const chunks = [];
-    let loaded = 0;
+    let loaded   = 0;
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -141,8 +147,6 @@ async function fetchPart(url, label, pStart, pEnd) {
 async function boot() {
     log('Starting…', 'dim');
     try {
-        // Fetch the pre-built .jsdos bundle (contains hdd.img + dosbox.conf)
-        // The bundle is gzip-compressed and split into two parts for GitHub Pages.
         const part1 = await fetchPart('win31_v3.jsdos.gz.aa', 'Part 1', 2, 45);
         const part2 = await fetchPart('win31_v3.jsdos.gz.ab', 'Part 2', 45, 80);
 
@@ -157,7 +161,7 @@ async function boot() {
         const bundleBytes = pako.inflate(combined);
         log('Bundle: ' + (bundleBytes.length/1024/1024).toFixed(0) + ' MB', 'ok');
 
-        const bundleBlob = new Blob([bundleBytes], { type: "application/zip" });
+        const bundleBlob = new Blob([bundleBytes], { type: 'application/zip' });
         const bundleUrl  = URL.createObjectURL(bundleBlob);
 
         setProgress('Starting emulator', 93);
@@ -167,7 +171,7 @@ async function boot() {
         const dosContainer = document.getElementById('dos-container');
         log('Starting DOSBox…', 'dim');
 
-        const realCI = await new Promise(function(resolve, reject) {
+        const ci = await new Promise(function(resolve, reject) {
             try {
                 Dos(dosContainer, {
                     url: bundleUrl,
@@ -175,95 +179,103 @@ async function boot() {
                     noCacheDb: true,
                     noCloud: true,
                     autoStart: true,
-                    imageRendering: "smooth",
-                    renderAspect: "4/3",
+                    imageRendering: 'smooth',
+                    renderAspect: '4/3',
                     onEvent: function(event, arg) {
                         log('DosEvent: ' + event, 'dim');
-                        if (event === 'ci-ready') { resolve(arg); }
+                        if (event === 'ci-ready') resolve(arg);
                     }
                 });
             } catch(e) { reject(e); }
         });
 
-        dosInstance = realCI;
+        dosInstance = ci;
 
-        // Probe what paths fsWriteFile actually accepts
-        const testPaths = ['c/src/test.txt', 'C/SRC/test.txt', '/c/src/test.txt', 'src/test.txt'];
-        const testData = new TextEncoder().encode('test');
-        for (const tp of testPaths) {
-            try {
-                await dosInstance.fsWriteFile(tp, testData);
-                log('fsWriteFile OK: ' + tp, 'ok');
-                break;
-            } catch(e) {
-                log('fsWriteFile FAIL: ' + tp + ' — ' + e.message, 'dim');
+        // Probe which path format fsWriteFile accepts
+        const probe = new TextEncoder().encode('ok');
+        const paths  = ['c/test.tmp', 'C/test.tmp', '/c/test.tmp'];
+        let workingBase = null;
+        for (const p of paths) {
+            try { await dosInstance.fsWriteFile(p, probe); workingBase = p.replace('test.tmp',''); log('fsWriteFile base: ' + workingBase, 'ok'); break; }
+            catch(e) { log('path probe fail: ' + p, 'dim'); }
+        }
+
+        // Pre-create C:\SRC and C:\EXPORT in the overlay FS
+        if (workingBase) {
+            for (const dir of ['src', 'export']) {
+                try { await dosInstance.fsWriteFile(workingBase + dir + '/.keep', probe); log('Created ' + workingBase + dir, 'dim'); }
+                catch(e) { log('mkdir fail: ' + dir + ' — ' + e.message, 'warn'); }
             }
         }
+
+        window._fsBase = workingBase || 'c/';
+
         log('Windows 3.1 booting…', 'ok');
         setProgress('Running', 100);
-        const ov = document.getElementById('boot-overlay');
-        if (ov) ov.classList.add('hidden');
+        document.getElementById('boot-overlay').classList.add('hidden');
         importBtn.disabled = false;
         exportBtn.disabled = false;
 
-
-
-    } catch (err) {
+    } catch(err) {
         log('FAILED: ' + err.message, 'err');
         console.error(err);
-        const bl = document.getElementById('boot-log'); if (bl) bl.textContent = 'Failed: ' + err.message;
+        const bl = document.getElementById('boot-log');
+        if (bl) bl.textContent = 'Failed: ' + err.message;
     }
 }
 
-// File input - plain change handler, no drop zone complications
-const uploadInput = document.getElementById('uploadZip');
-uploadInput.addEventListener('change', function() {
+// ---- File picker ----
+zipInput.addEventListener('change', function() {
     const f = this.files[0];
     if (f) { stageZip(f); this.value = ''; }
 });
 
 async function stageZip(file) {
     stagedFiles = {};
+    fileList.innerHTML = '<div class="file-list-empty">Reading…</div>';
     try {
         const zip = await (new JSZip()).loadAsync(file);
-        const ps = [];
-        zip.forEach(function(path, entry) { if (!entry.dir) ps.push(entry.async('uint8array').then(function(d) { stagedFiles[path] = d; })); });
+        const ps  = [];
+        zip.forEach(function(path, entry) {
+            if (!entry.dir) ps.push(entry.async('uint8array').then(function(d) { stagedFiles[path] = d; }));
+        });
         await Promise.all(ps);
         const keys = Object.keys(stagedFiles);
-        fileList.innerHTML = keys.length ? keys.map(function(p) { return '<div title="'+p+'">· '+p+'</div>'; }).join('') : '<div class="file-list-empty">Empty ZIP</div>';
-        importBtn.disabled = (keys.length === 0);  // enable once files staged
+        fileList.innerHTML = keys.length
+            ? keys.map(function(p) { return '<div title="' + p + '">· ' + p + '</div>'; }).join('')
+            : '<div class="file-list-empty">Empty ZIP</div>';
+        importBtn.disabled = (keys.length === 0);
         log('Staged ' + keys.length + ' file(s)', 'ok');
     } catch(e) { log('ZIP error: ' + e.message, 'err'); }
 }
 
+// ---- Import ----
 async function importFiles() {
-    if (!dosInstance) { log('DOS not ready yet - wait for boot to complete', 'err'); return; }
+    if (!dosInstance) { log('DOS not ready yet', 'err'); return; }
     importBtn.disabled = true;
+    const base = window._fsBase || 'c/';
     var ok = 0, fail = 0;
 
-    // Ensure c/src exists - fsWriteFile won't create missing directories
-    try { await dosInstance.fsWriteFile('c/src/.keep', new Uint8Array(0)); } catch(e) {}
-
-    // Create any subdirectory stubs first
-    const dirs = new Set();
+    // Create subdirectories
+    const dirs = new Set([base + 'src']);
     for (const path of Object.keys(stagedFiles)) {
         const parts = path.replace(/\\/g, '/').replace(/^\//, '').split('/');
         for (let i = 1; i < parts.length; i++)
-            dirs.add('c/src/' + parts.slice(0, i).join('/'));
+            dirs.add(base + 'src/' + parts.slice(0, i).join('/'));
     }
+    const stub = new TextEncoder().encode('');
     for (const dir of [...dirs].sort())
-        try { await dosInstance.fsWriteFile(dir + '/.keep', new Uint8Array(0)); } catch(e) {}
+        try { await dosInstance.fsWriteFile(dir + '/.keep', stub); } catch(e) {}
 
     for (const [path, data] of Object.entries(stagedFiles)) {
-        const clean = path.replace(/\\/g, '/').replace(/^\//, '');
-        const dosPath = 'c/src/' + clean;
-        log('Writing ' + clean + ' (' + data.length + 'b)...', 'dim');
+        const clean   = path.replace(/\\/g, '/').replace(/^\//, '');
+        const dosPath = base + 'src/' + clean;
         try {
             await dosInstance.fsWriteFile(dosPath, data);
-            log('  OK: ' + clean, 'ok');
+            log('OK: ' + clean, 'ok');
             ok++;
         } catch(e) {
-            log('  FAIL: ' + clean + ' — ' + e.message, 'err');
+            log('FAIL: ' + clean + ' — ' + e.message, 'err');
             fail++;
         }
     }
@@ -271,35 +283,37 @@ async function importFiles() {
     importBtn.disabled = false;
 }
 
+// ---- Export ----
 async function exportFiles() {
     if (!dosInstance) return;
     exportBtn.disabled = true;
     try {
+        const base = window._fsBase || 'c/';
         const tree = await dosInstance.fsTree();
-        log('FS tree: ' + JSON.stringify(tree.nodes ? tree.nodes.map(n=>n.name) : tree), 'dim');
+        log('FS roots: ' + JSON.stringify((tree.nodes||[]).map(function(n){return n.name;})), 'dim');
 
-        // Find c drive (case-insensitive)
-        const cDrive = tree.nodes && tree.nodes.find(n => n.name.toLowerCase() === 'c');
-        if (!cDrive) { log('C: drive not found in FS tree', 'err'); exportBtn.disabled = false; return; }
-        log('C: nodes: ' + (cDrive.nodes ? cDrive.nodes.map(n=>n.name).join(', ') : 'none'), 'dim');
+        const cDrive = (tree.nodes||[]).find(function(n){ return n.name.toLowerCase() === 'c'; });
+        if (!cDrive) { log('C: not in FS tree', 'err'); exportBtn.disabled = false; return; }
+        log('C: children: ' + (cDrive.nodes||[]).map(function(n){return n.name;}).join(', '), 'dim');
 
-        const exportDir = cDrive.nodes && cDrive.nodes.find(n => n.name.toUpperCase() === 'EXPORT');
-        if (!exportDir || !exportDir.nodes || !exportDir.nodes.length) {
-            log('C:\EXPORT\ empty or not found. Create it in DOS and copy files there.', 'warn');
+        const exportDir = (cDrive.nodes||[]).find(function(n){ return n.name.toUpperCase() === 'EXPORT'; });
+        if (!exportDir || !(exportDir.nodes||[]).length) {
+            log('C:\\EXPORT\\ empty — copy output files there in DOS first', 'warn');
             exportBtn.disabled = false; return;
         }
-        const files = exportDir.nodes.filter(n => n.size !== null);
-        log('Exporting ' + files.length + ' file(s) from C:\EXPORT\...', 'dim');
-        const zip = new JSZip();
+
+        const files = exportDir.nodes.filter(function(n){ return n.size !== null; });
+        const zip   = new JSZip();
         for (const e of files) {
-            const p = 'c/export/' + e.name;
-            log('  Reading ' + p, 'dim');
-            const data = await dosInstance.fsReadFile(p);
+            const data = await dosInstance.fsReadFile(base + 'export/' + e.name);
             zip.file(e.name, data);
+            log('+ ' + e.name, 'dim');
         }
         const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = 'win16_export.zip'; a.click();
+        const a    = document.createElement('a');
+        a.href     = URL.createObjectURL(blob);
+        a.download = 'win16_export.zip';
+        a.click();
         URL.revokeObjectURL(a.href);
         log('Exported ' + files.length + ' file(s)', 'ok');
     } catch(e) { log('Export error: ' + e.message, 'err'); }
